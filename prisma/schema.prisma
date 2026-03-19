@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["account", "auth", "billing", "investing", "market_data"]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model user {
+  id           Int           @id @default(autoincrement()) @map("_id")
+  user_id      String?       @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone_number String        @db.VarChar(15)
+  birth_date   DateTime      @db.Date
+  email        String        @unique
+  password     String
+  is_active    Boolean?      @default(true)
+  created_at   DateTime?     @db.Timestamptz(6)
+  accounts     accounts[]
+  portofolios  portofolios[]
+
+  @@schema("auth")
+}
+
+model accounts {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String         @db.Uuid
+  balance      Decimal?       @default(0) @db.Decimal(12, 4)
+  created_at   DateTime?      @default(now()) @db.Timestamptz(6)
+  currency     String?        @default("XAF") @db.VarChar(8)
+  user         user           @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_accounts_user")
+  transactions transactions[]
+
+  @@index([user_id], map: "idx_accounts_user_id")
+  @@schema("billing")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model transactions {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  account_id String            @db.Uuid
+  amount     Decimal           @db.Decimal(12, 4)
+  type       transaction_type? @default(buy)
+  created_at DateTime?         @default(now()) @db.Timestamptz(6)
+  accounts   accounts          @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_transactions_account")
+
+  @@index([account_id], map: "idx_transactions_account_id")
+  @@schema("billing")
+}
+
+model portofolios {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String      @db.Uuid
+  created_at DateTime?   @default(now()) @db.Timestamptz(6)
+  user       user        @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_portofolios_user")
+  positions  positions[]
+
+  @@index([user_id], map: "idx_portofolios_user_id")
+  @@schema("investing")
+}
+
+model positions {
+  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portofolio_id        String               @db.Uuid
+  etf_id               String               @db.Uuid
+  quantity             Decimal              @db.Decimal(12, 4)
+  avg_buy_price        Decimal              @db.Decimal(12, 4)
+  created_at           DateTime?            @default(now()) @db.Timestamptz(6)
+  exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_positions_etf")
+  portofolios          portofolios          @relation(fields: [portofolio_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_positions_portofolio")
+
+  @@index([etf_id], map: "idx_positions_etf_id")
+  @@index([portofolio_id], map: "idx_positions_portofolio_id")
+  @@schema("investing")
+}
+
+model exchange_traded_fund {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  symbol         String      @db.VarChar(50)
+  name           String
+  currency       String      @db.VarChar(10)
+  category       String?     @db.VarChar(100)
+  region         String?     @db.VarChar(100)
+  risk_level     String?     @db.VarChar(50)
+  expense_ratio  Decimal?    @db.Decimal(6, 4)
+  inception_date DateTime?   @db.Date
+  dividend_yield Decimal?    @db.Decimal(5, 4)
+  positions      positions[]
+  prices         prices[]
+
+  @@schema("market_data")
+}
+
+model prices {
+  etf_id               String               @db.Uuid
+  price                Decimal              @db.Decimal(12, 4)
+  recorded_at          DateTime             @default(now()) @db.Timestamptz(6)
+  exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_prices_etf")
+
+  @@id([etf_id, recorded_at])
+  @@index([recorded_at], map: "idx_prices_recorded_at")
+  @@schema("market_data")
+}
+
+model portofolio_snapshots {
+  id               BigInt   @id @default(autoincrement())
+  portofolio_id    String   @db.Uuid
+  portofolio_value Decimal  @db.Decimal(18, 2)
+  invested_amount  Decimal? @db.Decimal(18, 2)
+  recorded_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@schema("investing")
+}
+
+enum transaction_type {
+  buy
+  sell
+  deposit
+  withdraw
+
+  @@schema("billing")
+}
