@@ -14,8 +14,8 @@ export class AccountControllers {
 
     async depositController(req: Request, res: Response) {
         try {
-            const { amount, user_id } = req.body;
-
+            const { amount } = req.body;
+            const {user_id}=req.user
 
             if (!amount || isNaN(amount)) {
                 throw new AppError("Le montant est requis et doit être un nombre", 400);

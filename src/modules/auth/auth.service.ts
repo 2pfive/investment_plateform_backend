@@ -40,7 +40,7 @@ export class AuthService{
             portfolio_id:account.portfolio.id
         })
 
-        const user_session:UserSession=account
+        const user_session:UserSession=account as any
         return {
           user_session,
           token

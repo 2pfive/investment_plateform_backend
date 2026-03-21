@@ -1,3 +1,8 @@
+import dotenv from "dotenv";
+
+dotenv.config({
+    path: `.env.${process.env.NODE_ENV || "development"}`
+});
 
 
 const origins = process.env.ORIGINS?.split(",").map(o => o.trim()) || [
@@ -19,7 +24,7 @@ const corsOptions = {
         return callback(null, false);
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS","PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
     exposedHeaders: ["Content-Range", "X-Total-Count"],
     preflightContinue: false,
@@ -31,4 +36,5 @@ export const config = {
     corsOptions: corsOptions,
     port: process.env.PORT || 3300,
     saltRounds: process.env.SALT_ROUNDS || 10,
+    cookie_jwt_name:process.env.COOKIE_JWT_NAME
 }

@@ -6,13 +6,13 @@ import AuthRouter from "../modules/auth/auth.router.js"
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import YahooFinance from "yahoo-finance2/src/index.ts";
-
+import {requireAuth} from "../middlewares/auth.middlewares.js"
 
 const router=Router()
 
 router.use('/users',userRouter)
-router.use("/investing",investingRouter)
-router.use("/billing",BillingRouter)
+router.use("/investing",requireAuth,investingRouter)
+router.use("/billing",requireAuth,BillingRouter)
 router.use('/auth',AuthRouter)
 
 router.get('/etf', async (req: Request, res: Response) => {

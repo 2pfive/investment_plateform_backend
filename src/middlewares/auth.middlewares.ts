@@ -1,16 +1,17 @@
 import jwt from "jsonwebtoken"
 import { readFileSync } from "fs"
 import { Request, Response, NextFunction } from "express";
+import { config } from "@/config/env.js";
 
 export const requireAuth = (req:Request, res:Response, next:NextFunction) => {
 
-    const token = req.cookies.OARH_AUTH;
+    const token = req.cookies[`${config.cookie_jwt_name}`];
 
     if (!token) {
         return res.status(401).json({ error: 'Token manquant ou invalide' });
     }
 
-    const publicKey = readFileSync('./config/session_user_key_public.pem', 'utf-8');
+    const publicKey = readFileSync('./src/config/session_user_key_public.pem', 'utf-8');
 
     jwt.verify(token, publicKey, (err:any, decoded:any) => {
         if (err) {
