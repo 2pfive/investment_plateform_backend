@@ -520,4 +520,6 @@ export class InvestingService {
     
         }
     }
+
+  
 }

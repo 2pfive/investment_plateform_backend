@@ -50,28 +50,30 @@ async function startPriceInterval() {
         try {
 
             const quotes2:any[]=[]
+            
             const quotes = await Promise.all(
                 trackedETFs.map(async (etf) => {
-
-                    const res = await yf.quote(etf.symbol);
-                    quotes2.push(res)
+            
+                    const res = await yf.quote(etf.symbol)
+                    console.log({
+                        symbol: etf.symbol,
+                        marketState: res.marketState,
+                        regular: res.regularMarketPrice,
+                        post: res.postMarketPrice
+                    })
                     return {
                         etf_id: etf.etfId,
-                        price: res.regularMarketPrice,
-                        recorded_at: new Date(
-                            res.regularMarketTime || Date.now()
-                        )
-                    };
-
+                        price: getLivePrice(res),
+                        marketState: res.marketState,
+                        recorded_at: new Date()
+                    }
+            
                 })
-            );
-
-            await prisma.prices.createMany({
-                data: quotes,
-                skipDuplicates: true
-            });
-
-            broadcast(quotes2);
+            )
+            
+            console.log("🟢 Broadcasting to", wss.clients.size, "clients")
+            
+            broadcast(quotes)
 
         } catch (err) {
             console.error("Erreur récupération prix:", err);
@@ -147,3 +149,21 @@ function startPortfolioSnapshotInterval() {
     }, 900000);
 
 } 
+
+
+const getLivePrice = (res: any) => {
+    switch (res.marketState) {
+        case "REGULAR":
+            return res.regularMarketPrice
+
+     
+        case "CLOSED":
+            return res.postMarketPrice ?? res.regularMarketPrice
+
+        case "PRE":
+            return res.preMarketPrice ?? res.regularMarketPrice
+
+        default:
+            return res.regularMarketPrice
+    }
+}
