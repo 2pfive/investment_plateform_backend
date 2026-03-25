@@ -37,7 +37,7 @@ router.get('/etf', async (req: Request, res: Response) => {
 router.get('/quote-history',async(req:Request,res:Response)=>{
     try {
     const yf=new YahooFinance()
-    const response=await yf.quote("SPY")
+    const response=await yf.quote("QQQ")
     res.status(200).json(response)
 
     } catch (error) {

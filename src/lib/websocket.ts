@@ -99,7 +99,7 @@ function broadcast(data: any) {
 
     });
 }
-
+ 
 /**
  * Send latest prices per ETF
  */
