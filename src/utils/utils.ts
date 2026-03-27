@@ -1,6 +1,5 @@
 import bcrypt from "bcrypt"
 import { config } from "config/env.js"
-import { string } from "zod"
 import axios from "axios"
 
 export const hashPassword = async (pswd: string) => {

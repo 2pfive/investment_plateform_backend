@@ -3,6 +3,8 @@ import userRouter from "../modules/user/user.router.js"
 import investingRouter from "../modules/investing/investing.router.js"
 import BillingRouter from "../modules/accounts/account.router.js"
 import AuthRouter from "../modules/auth/auth.router.js"
+import MarketRouter from "../modules/market/market.router.js"
+
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import YahooFinance from "yahoo-finance2/src/index.ts";
@@ -14,6 +16,8 @@ router.use('/users',userRouter)
 router.use("/investing",requireAuth,investingRouter)
 router.use("/billing",requireAuth,BillingRouter)
 router.use('/auth',AuthRouter)
+router.use('/market',MarketRouter)
+
 
 router.get('/etf', async (req: Request, res: Response) => {
     try {
