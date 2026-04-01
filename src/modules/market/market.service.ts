@@ -44,6 +44,47 @@ class MarketService {
         );
         return quotes;
     }
+
+    async getDetailsByEtfId(etf_id: string) {
+        if (!etf_id) throw new AppError("etf_id requis", 400)
+
+        const etf = await prisma.exchange_traded_fund.findUnique({
+            where: {
+                id: etf_id
+            },
+            select: {
+                id: true,
+                symbol: true,
+                name: true,
+                currency: true,
+                provider: true,
+                description: true,
+                inception_date: true,
+
+                prices: {
+                    orderBy: {
+                      recorded_at: 'desc'
+                    },
+                    take: 1 // dernier prix uniquement
+                },
+                
+                etf_holding: {
+                    select: {
+                        name: true,
+                        symbol: true,
+                        weight: true
+                    },
+                    orderBy: {
+                        weight: 'desc'
+                    }
+                }
+            }
+        })
+
+        if (!etf) throw new AppError("ETF introuvable", 404)
+
+        return etf
+    }
 }
 
 export default MarketService;

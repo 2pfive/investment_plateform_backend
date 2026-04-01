@@ -43,8 +43,8 @@ export async function getXafToUsdRate(): Promise<number> {
 
 export function normalizeQuote(quote: any) {
   return {
-      ...quote,
-      ytd: quote.ytd != null ? +(quote.ytd * 100).toFixed(2) : null,
-      changePercent: quote.changePercent != null ? +(quote.changePercent * 100).toFixed(2) : null
+    ...quote,
+    ytd: quote.ytd != null ? +(quote.ytd * 100).toFixed(2) : null,
+    changePercent: quote.changePercent != null ? +(quote.changePercent * 100).toFixed(2) : null
   };
 }

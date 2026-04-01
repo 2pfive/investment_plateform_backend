@@ -76,18 +76,27 @@ model positions {
 }
 
 model exchange_traded_fund {
-  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  symbol         String      @db.VarChar(50)
-  name           String
-  currency       String      @db.VarChar(10)
-  category       String?     @db.VarChar(100)
-  region         String?     @db.VarChar(100)
-  risk_level     String?     @db.VarChar(50)
-  expense_ratio  Decimal?    @db.Decimal(6, 4)
-  inception_date DateTime?   @db.Date
-  dividend_yield Decimal?    @db.Decimal(5, 4)
-  positions      positions[]
-  prices         prices[]
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  symbol                 String         @db.VarChar(50)
+  name                   String
+  currency               String         @db.VarChar(10)
+  category               String?        @db.VarChar(100)
+  region                 String?        @db.VarChar(100)
+  risk_level             String?        @db.VarChar(50)
+  expense_ratio          Decimal?       @db.Decimal(6, 4)
+  inception_date         DateTime?      @db.Date
+  dividend_yield         Decimal?       @db.Decimal(5, 4)
+  isin                   String?        @db.VarChar(20)
+  description            String?
+  provider               String?        @db.VarChar(100)
+  type                   String         @default("ACC") @db.VarChar(10)
+  asset_class            String?        @db.VarChar(50)
+  sector                 String?        @db.VarChar(100)
+  distribution_frequency String?        @db.VarChar(20)
+  positions              positions[]
+  etf_dividend           etf_dividend[]
+  etf_holding            etf_holding[]
+  prices                 prices[]
 
   @@schema("market_data")
 }
@@ -111,6 +120,28 @@ model portofolio_snapshots {
   recorded_at      DateTime @default(now()) @db.Timestamptz(6)
 
   @@schema("investing")
+}
+
+model etf_dividend {
+  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  etf_id               String               @db.Uuid
+  amount               Decimal              @db.Decimal(10, 4)
+  currency             String               @db.VarChar(10)
+  pay_date             DateTime             @db.Date
+  exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_etf_div")
+
+  @@schema("market_data")
+}
+
+model etf_holding {
+  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  etf_id               String               @db.Uuid
+  name                 String               @db.VarChar(100)
+  symbol               String?              @db.VarChar(20)
+  weight               Decimal              @db.Decimal(5, 2)
+  exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_etf")
+
+  @@schema("market_data")
 }
 
 enum transaction_type {

@@ -38,10 +38,11 @@ router.get('/etf', async (req: Request, res: Response) => {
 });
 
 
-router.get('/quote-history',async(req:Request,res:Response)=>{
+router.get('/quote-history/:symbol',async(req:Request,res:Response)=>{
     try {
+        const {symbol}=req.params
     const yf=new YahooFinance()
-    const response=await yf.quote("QQQ")
+    const response=await yf.quote(symbol)
     res.status(200).json(response)
 
     } catch (error) {
