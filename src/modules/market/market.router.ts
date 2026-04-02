@@ -8,7 +8,7 @@ const controller=new MarketControllers()
 router.get('/etfs',controller.getETFs)
 router.get('/quotes',controller.getAllQuotes)
 router.get('/etf/:etf_id/details',controller.getEtfDetails)
-
+router.get("/etfs/:id/performance", controller.getEtfPerformance)
 
 
 

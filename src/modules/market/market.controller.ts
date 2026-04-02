@@ -9,6 +9,7 @@ export default class MarketControllers {
         this.getETFs = this.getETFs.bind(this)
         this.getAllQuotes=this.getAllQuotes.bind(this)
         this.getEtfDetails=this.getEtfDetails.bind(this)
+        this.getEtfPerformance=this.getEtfPerformance.bind(this)
     }
 
     async getETFs(req: Request, res: Response) {
@@ -90,4 +91,32 @@ export default class MarketControllers {
         }
     }
 
+    async getEtfPerformance(req: Request, res: Response) {
+        try {
+            const { id } = req.params
+            const { period } = req.query
+    
+            const result = await this.marketService.getEtfPerformance(
+                id,
+                period as any
+            )
+    
+            res.status(200).json({
+                success: true,
+                data: result
+            })
+        } catch (error: any) {
+            if (error instanceof AppError) {
+                return res.status(error.statusCode).json({
+                    success: false,
+                    message: error.message
+                });
+            }
+    
+            res.status(500).json({
+                success: false,
+                message: error?.message || "Erreur interne serveur"
+            })
+        }
+    }
 }

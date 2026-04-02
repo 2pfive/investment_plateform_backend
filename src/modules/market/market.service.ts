@@ -85,6 +85,68 @@ class MarketService {
 
         return etf
     }
+
+    async getEtfPerformance(etf_id: string, period: '1D' | '1M' | '3M' | '1Y' = '1M') {
+        if (!etf_id) throw new AppError("etf_id requis", 400)
+    
+        const now = new Date()
+    
+        const periodConfig: Record<string, { days: number; aggregate: boolean; step: number }> = {
+            '1D': { days: 1,   aggregate: false, step: 2   }, // 1 point / 30s (~2880 pts)
+            '1M': { days: 30,  aggregate: false,  step: 4   }, // 1 point / jour (~30 pts)
+            '3M': { days: 90,  aggregate: true,  step: 1   }, // 1 point / jour (~90 pts)
+            '1Y': { days: 365, aggregate: true,  step: 1   }, // 1 point / jour (~365 pts)
+        }
+    
+        const { days, aggregate, step } = periodConfig[period] ?? periodConfig['1M']
+        const fromDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+    
+        const prices = await prisma.prices.findMany({
+            where: { etf_id, recorded_at: { gte: fromDate } },
+            orderBy: { recorded_at: 'asc' },
+            select: { price: true, recorded_at: true }
+        })
+    
+        if (!prices.length) return []
+    
+        let points: { date: Date; close: number }[]
+    
+        if (aggregate) {
+            // 1M / 3M / 1Y → prix de clôture par jour
+            const buckets = new Map<string, { close: number; date: Date }>()
+    
+            for (const p of prices) {
+                const d = p.recorded_at
+                const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+                buckets.set(key, { close: Number(p.price), date: d })
+            }
+    
+            points = Array.from(buckets.values())
+        } else {
+            // 1D → 1 point toutes les N entrées (contrôle densité via step)
+            points = prices
+                .filter((_, i) => i % step === 0)
+                .map(p => ({ date: p.recorded_at, close: Number(p.price) }))
+        }
+    
+        const firstPrice = points[0].close
+    
+        return points.map(p => ({
+            x: p.date,
+            y: Number(((p.close - firstPrice) / firstPrice * 100).toFixed(2))
+        }))
+    }
+}
+
+const formatPerformance = (prices: any[]) => {
+    if (!prices?.length) return []
+
+    const firstPrice = Number(prices[0].price)
+
+    return prices.map(p => ({
+        x: p.recorded_at,
+        y: ((Number(p.price) - firstPrice) / firstPrice) * 100
+    }))
 }
 
 export default MarketService;

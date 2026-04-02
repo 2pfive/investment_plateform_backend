@@ -46,39 +46,51 @@ export function initWebSocket(server: HttpServer) {
     if (!portfolioInterval) startPortfolioSnapshotInterval();
 }
 
+
 /**
- * Price polling
+ * Price polling avec enregistrement en base (modèle actuel)
  */
 async function startPriceInterval() {
     interval = setInterval(async () => {
         try {
-            // Récupère toutes les quotes via le service
             const quotes = await marketService.getAllQuotes();
 
-            // Transforme si besoin pour le front (ex: calculer isDown)
-            const payload = quotes.map(q => ({
-                id: q.id,
-                symbol: q.symbol,
-                name: q.name,
-                price: q.price,
-                change: q.change,
-                changePercent: q.changePercent,
-                ytd: q.ytd,
-                low52: q.low52,
-                high52: q.high52,
-                volume: q.volume,
-                expenseRatio: q.expenseRatio,
-                isDown: q.change < 0
-            }));
+            const payload = [];
+
+            for (const q of quotes) {
+                // Envoie pour le front
+                payload.push({
+                    id: q.id,
+                    symbol: q.symbol,
+                    name: q.name,
+                    price: q.price,
+                    change: q.change,
+                    changePercent: q.changePercent,
+                    ytd: q.ytd,
+                    low52: q.low52,
+                    high52: q.high52,
+                    volume: q.volume,
+                    expenseRatio: q.expenseRatio,
+                    isDown: q.change < 0
+                });
+
+                // Enregistrement DB (seulement price)
+                await prisma.prices.create({
+                    data: {
+                        etf_id: q.id,   // ou q.etfId selon l’objet
+                        price: q.price,
+                        recorded_at: new Date()
+                    }
+                });
+            }
 
             console.log("🟢 Broadcasting to", wss.clients.size, "clients");
-
             broadcast(payload);
 
         } catch (err) {
-            console.error("Erreur récupération prix:", err);
+            console.error("Erreur récupération/enregistrement prix:", err);
         }
-    }, 15000); // toutes les 15s
+    }, 15000);
 }
 
 /**
@@ -102,18 +114,37 @@ function broadcast(data: any) {
 /**
  * Send latest prices per ETF
  */
-async function sendLatestPrices(socket: WebSocket) {
 
+async function sendLatestPrices(socket: WebSocket) {
     try {
+        // Récupère tous les ETFs suivis depuis la base
+        const etfs = await prisma.exchange_traded_fund.findMany({
+            select: { id: true, symbol: true, name: true }
+        });
+
+        if (!etfs.length) return;
 
         const latestPrices = await Promise.all(
-            trackedETFs.map(async (etf) => {
-
-                return prisma.prices.findFirst({
-                    where: { etf_id: etf.etfId },
+            etfs.map(async (etf) => {
+                const price = await prisma.prices.findFirst({
+                    where: { etf_id: etf.id },
                     orderBy: { recorded_at: "desc" }
                 });
 
+                return {
+                    etfId: etf.id,
+                    symbol: etf.symbol,
+                    name: etf.name,
+                    price: price?.price ?? null,
+                    change: price?.change ?? null,
+                    changePercent: price?.changePercent ?? null,
+                    ytd: price?.ytd ?? null,
+                    low52: price?.low52 ?? null,
+                    high52: price?.high52 ?? null,
+                    volume: price?.volume ?? null,
+                    expenseRatio: price?.expenseRatio ?? null,
+                    isDown: price ? price.change < 0 : null
+                };
             })
         );
 
