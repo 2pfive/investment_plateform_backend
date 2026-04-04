@@ -97,7 +97,7 @@ export default class MarketControllers {
             const { period } = req.query
     
             const result = await this.marketService.getEtfPerformance(
-                id,
+                id as string,
                 period as any
             )
     

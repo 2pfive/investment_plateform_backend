@@ -71,7 +71,8 @@ async function startPriceInterval() {
                     high52: q.high52,
                     volume: q.volume,
                     expenseRatio: q.expenseRatio,
-                    isDown: q.change < 0
+                    isDown: q.change < 0,
+                    trailingThreeMonthReturns:q.trailingThreeMonthReturns
                 });
 
                 // Enregistrement DB (seulement price)
@@ -143,7 +144,8 @@ async function sendLatestPrices(socket: WebSocket) {
                     high52: price?.high52 ?? null,
                     volume: price?.volume ?? null,
                     expenseRatio: price?.expenseRatio ?? null,
-                    isDown: price ? price.change < 0 : null
+                    isDown: price ? price.change < 0 : null,
+                    trailingThreeMonthReturns:price?.trailingThreeMonthReturns ?? null
                 };
             })
         );
