@@ -9,8 +9,9 @@ export interface UserSession{
     account:{
         balance: number,
         currency: string,
-        user: UserPublic
-     } [],
+        user: UserPublic,
+        exchangeRate?:number
+     } ,
     positions: {
         quantity: number,
         avg_buy_price: number,

@@ -150,6 +150,8 @@ class MarketService {
                 '1M': { range: '1mo', interval: '1d' },
                 '3M': { range: '3mo', interval: '1d' },
                 '1Y': { range: '1y', interval: '1d' },
+                '3Y': { range: '3y', interval: '1d' },
+                '5Y': { range: '5y', interval: '1d' },
                 'MAX': { range: 'max', interval: '1d' },
             }
 

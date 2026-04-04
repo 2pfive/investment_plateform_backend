@@ -2,7 +2,7 @@ import { generateToken } from "@/lib/jsonwebtoken.js";
 import { prisma } from "@/lib/prisma.js";
 import { LoginDTO } from "@/types/dto/auth.dto.js";
 import { AppError } from "@/utils/errorHandler.js";
-import { comparePasswords } from "@/utils/utils.js";
+import { comparePasswords, getXafToUsdRate } from "@/utils/utils.js";
 import { Accountservice } from "../accounts/account.service.js";
 import { UserSession } from "@/types/user.types.js";
 
@@ -39,8 +39,14 @@ export class AuthService{
             account_id:account.account.id,
             portfolio_id:account.portfolio.id
         })
-
+     
         const user_session:UserSession=account as any
+        const exchangeRate = await getXafToUsdRate();
+
+        if (exchangeRate && user_session.account) {
+            user_session.account.exchangeRate = exchangeRate;
+        }
+        
         return {
           user_session,
           token
