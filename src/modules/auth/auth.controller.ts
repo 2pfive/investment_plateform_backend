@@ -8,8 +8,9 @@ export class AuthControllers {
     constructor() {
         this.authService = new AuthService()
         this.loginController = this.loginController.bind(this)
+        this.verifyCurrentUser = this.verifyCurrentUser.bind(this)
     }
-    static setCookie(res:Response, name:string, value:any, options:any = {}) {
+    static setCookie(res: Response, name: string, value: any, options: any = {}) {
         const defaultOptions = {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
@@ -26,7 +27,7 @@ export class AuthControllers {
 
             if (!email || !password) throw new AppError("Missing required fields email and password", 400)
             const result = await this.authService.login({ email, password })
-            AuthControllers.setCookie(res,config.cookie_jwt_name || "AUTH_TOKEN",result.token)
+            AuthControllers.setCookie(res, config.cookie_jwt_name || "AUTH_TOKEN", result.token)
             res.status(200).json({
                 success: true,
                 message: "connexion réussie",
@@ -48,4 +49,23 @@ export class AuthControllers {
         }
     }
 
+
+    async verifyCurrentUser(req: Request, res: Response) {
+        try {
+            console.log("req.user", req.user);
+
+            const user = await this.authService.getCurrentUser(req.user)
+
+            res.status(200).json({
+                success: true,
+                data: user
+            })
+
+        } catch (error: any) {
+            res.status(401).json({
+                success: false,
+                message: error.message
+            })
+        }
+    }
 }

@@ -9,6 +9,9 @@ export class InvestingService {
     /**
      * Investir par montant
      */
+    /**
+   * Investir par montant
+   */
     async investByAmount({
         user_id,
         etf_id,
@@ -81,10 +84,10 @@ export class InvestingService {
 
             const investAmountDecimal = new Decimal(amount_to_invest);
 
-            //  Conversion XAF → USD
+            // Conversion XAF → USD
             const amountInUSD = investAmountDecimal.times(rate);
 
-            //  Quantité achetée
+            // Quantité achetée
             const quantityBought = amountInUSD.div(currentPrice);
 
             // Position
@@ -92,6 +95,9 @@ export class InvestingService {
                 where: {
                     portofolio_id: portfolio.id,
                     etf_id
+                },
+                include: {
+                    exchange_traded_fund: true
                 }
             });
 
@@ -150,13 +156,83 @@ export class InvestingService {
                 }
             });
 
+            // Récupérer les informations mises à jour de l'utilisateur
+            const updatedUser = await tx.user.findUnique({
+                where: { user_id },
+                include: {
+                    accounts: {
+                        include: {
+                            user: {
+                                select: {
+                                    email: true,
+                                    phone_number: true,
+                                    birth_date: true,
+                                    created_at: true
+                                }
+                            }
+                        }
+                    },
+                    portofolios: {
+                        include: {
+                            positions: {
+                                include: {
+                                    exchange_traded_fund: true
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!updatedUser)
+                throw new AppError("Erreur lors de la récupération des données mises à jour", 500);
+
+            // Formater les données pour correspondre à UserSession
+            const updatedAccount = updatedUser.accounts[0];
+            const updatedPortfolio = updatedUser.portofolios[0];
+
+            const user_session: UserSession = {
+                account: {
+                    balance: updatedAccount.balance.toNumber(),
+                    currency: updatedAccount.currency,
+                    user: {
+                        email: updatedAccount.user.email,
+                        phone_number: updatedAccount.user.phone_number,
+                        birth_date: updatedAccount.user.birth_date,
+                        created_at: updatedAccount.user.created_at
+                    }
+                },
+                positions: updatedPortfolio?.positions.map(pos => ({
+                    quantity: pos.quantity,
+                    avg_buy_price: pos.avg_buy_price,
+                    exchange_traded_fund: {
+                        id: pos.exchange_traded_fund.id,
+                        symbol: pos.exchange_traded_fund.symbol,
+                        name: pos.exchange_traded_fund.name,
+                        currency: pos.exchange_traded_fund.currency,
+                        category: pos.exchange_traded_fund.category,
+                        region: pos.exchange_traded_fund.region,
+                        risk_level: pos.exchange_traded_fund.risk_level,
+                        expense_ratio: pos.exchange_traded_fund.expense_ratio,
+                        inception_date: pos.exchange_traded_fund.inception_date,
+                        dividend_yield: pos.exchange_traded_fund.dividend_yield
+                    }
+                })) || []
+            };
+
+            // Ajouter le taux de change si disponible
+            // const exchangeRate = await getXafToUsdRate();
+            // if (exchangeRate && user_session.account) {
+            //     user_session.account.exchangeRate = exchangeRate;
+            // }
+            user_session.account.exchangeRate=rate
             return {
                 quantityBought: quantityBought.toNumber(),
                 current_price: currentPrice.toNumber(),
-                remainingBalance:
-                    freshAccount.balance
-                        .minus(amount_to_invest)
-                        .toNumber()
+                remainingBalance: freshAccount.balance
+                    .minus(amount_to_invest)
+                    .toNumber(),
+                user_session
             };
 
         });

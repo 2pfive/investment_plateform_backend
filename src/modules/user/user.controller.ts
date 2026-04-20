@@ -1,5 +1,5 @@
 import { UserService } from "./user.service.js";
-
+import { Request, Response } from "express";
 
 export class usersControllers {
     private userservice
@@ -22,11 +22,11 @@ export class usersControllers {
 
             res.status(201).json({
                 success: true,
-                status:201,
+                status: 201,
                 data: result
             });
 
-        } catch (error:any) {
+        } catch (error: any) {
             res.status(400).json({
                 success: false,
                 message: error.message

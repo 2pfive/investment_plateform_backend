@@ -13,12 +13,14 @@ export class InvestingController {
 
     public Invest = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const { user_id, amount_to_invest, etf_id } = req.body
+            const { amount_to_invest, etf_id } = req.body
+            const {user_id}=req.user
+
             const result = await this.investService.investByAmount({ user_id, etf_id, amount_to_invest })
             res.status(201).json({
                 success: true,
                 status: 201,
-                data: result
+                ...result
             });
 
         } catch (error: any) {
@@ -39,8 +41,9 @@ export class InvestingController {
 
     public GetperFormancePortfolio = async (req: Request, res: Response) => {
         try {
-            const { id } = req.params
-            const result = await this.investService.getAllPerformances(id)
+            // const { id } = req.params
+            const {portfolio_id}=req.user
+            const result = await this.investService.getAllPerformances(portfolio_id)
             res.status(201).json({
                 success: true,
                 status: 201,
