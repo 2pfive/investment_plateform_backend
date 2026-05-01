@@ -2,13 +2,13 @@ export interface UserPublic {
     email: string;
     phone_number: string;
     birth_date:Date,
-    created_at?: Date;
+    created_at?: Date | null;
 }
 
 export interface UserSession{
     account:{
         balance: number,
-        currency: string,
+        currency: string | null,
         user: UserPublic,
         exchangeRate?:number
      } ,
@@ -20,12 +20,12 @@ export interface UserSession{
             symbol: string,
             name: string,
             currency: string,
-            category: string,
-            region: string,
-            risk_level: string,
-            expense_ratio: number,
-            inception_date: Date,
-            dividend_yield: number
+            category: string | null,
+            region: string | null,
+            risk_level: string | null,
+            expense_ratio: number | null,
+            inception_date: Date | null,
+            dividend_yield: number | null
         }
     }[]
 }

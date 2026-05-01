@@ -14,7 +14,11 @@ export class InvestingController {
     public Invest = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             const { amount_to_invest, etf_id } = req.body
-            const {user_id}=req.user
+            const { user_id } = req.user ?? {}
+
+            if (!user_id) {
+                throw new AppError("user_id requis", 400)
+            }
 
             const result = await this.investService.investByAmount({ user_id, etf_id, amount_to_invest })
             res.status(201).json({
@@ -42,7 +46,11 @@ export class InvestingController {
     public GetperFormancePortfolio = async (req: Request, res: Response) => {
         try {
             // const { id } = req.params
-            const {portfolio_id}=req.user
+            const { portfolio_id } = req.user ?? {}
+
+            if (!portfolio_id) {
+                throw new AppError("portfolio_id requis", 400)
+            }
             const result = await this.investService.getAllPerformances(portfolio_id)
             res.status(201).json({
                 success: true,
