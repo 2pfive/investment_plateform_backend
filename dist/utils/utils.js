@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { config } from "config/env.js";
+import { config } from "../config/env.js";
 import axios from "axios";
 export const hashPassword = async (pswd) => {
     const hashed = await bcrypt.hash(pswd, config.saltRounds);

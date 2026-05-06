@@ -7,7 +7,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { config } from "./config/env.js";
 import router from "./router/index.js";
-import { initWebSocket } from "lib/websocket.js";
+import { initWebSocket } from "./lib/websocket.js";
 dotenv.config({
     path: `.env.${process.env.NODE_ENV || "development"}`
 });

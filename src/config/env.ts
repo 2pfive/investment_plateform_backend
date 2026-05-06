@@ -35,7 +35,7 @@ const corsOptions = {
 export const config = {
     corsOptions: corsOptions,
     port: process.env.PORT || 3300,
-    saltRounds: process.env.SALT_ROUNDS || 10,
+    saltRounds: Number(process.env.SALT_ROUNDS) || 10,
     cookie_jwt_name:process.env.COOKIE_JWT_NAME,
     exchange_rate_url:`${process.env.EXCHANGE_RATE_URL}${process.env.EXCHANGE_RATE_API_KEY}`,
 

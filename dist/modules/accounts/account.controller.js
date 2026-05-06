@@ -1,5 +1,5 @@
 import { Accountservice } from "./account.service.js";
-import { AppError } from "@/utils/errorHandler.js";
+import { AppError } from "../../utils/errorHandler.js";
 export class AccountControllers {
     accountService;
     constructor() {
@@ -10,7 +10,7 @@ export class AccountControllers {
     async depositController(req, res) {
         try {
             const { amount } = req.body;
-            const { user_id } = req.user;
+            const { user_id } = req.user ?? {};
             if (!amount || isNaN(amount)) {
                 throw new AppError("Le montant est requis et doit être un nombre", 400);
             }

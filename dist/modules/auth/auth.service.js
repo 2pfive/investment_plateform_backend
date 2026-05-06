@@ -1,7 +1,7 @@
-import { generateToken } from "@/lib/jsonwebtoken.js";
-import { prisma } from "@/lib/prisma.js";
-import { AppError } from "@/utils/errorHandler.js";
-import { comparePasswords, getXafToUsdRate } from "@/utils/utils.js";
+import { generateToken } from "../../lib/jsonwebtoken.js";
+import { prisma } from "../../lib/prisma.js";
+import { AppError } from "../../utils/errorHandler.js";
+import { comparePasswords, getXafToUsdRate } from "../../utils/utils.js";
 import { Accountservice } from "../accounts/account.service.js";
 export class AuthService {
     account_service;

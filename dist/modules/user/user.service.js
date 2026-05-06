@@ -1,5 +1,5 @@
-import { prisma } from "lib/prisma.js";
-import { hashPassword } from "utils/utils.js";
+import { prisma } from "../../lib/prisma.js";
+import { hashPassword } from "../../utils/utils.js";
 export class UserService {
     async create(user) {
         if (!user.password) {

@@ -80,7 +80,9 @@ export class Accountservice {
                         user_id: true,
                         email: true,
                         phone_number: true,
-                        birth_date: true
+                        birth_date: true,
+                        first_name: true,
+                        last_name: true
                     }
                 }
             }

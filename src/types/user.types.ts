@@ -2,6 +2,8 @@ export interface UserPublic {
     email: string;
     phone_number: string;
     birth_date:Date,
+    first_name?: string,
+    last_name?: string,
     created_at?: Date | null;
 }
 

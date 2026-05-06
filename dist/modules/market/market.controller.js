@@ -1,5 +1,5 @@
 import MarcketService from "./market.service.js";
-import { AppError } from "@/utils/errorHandler.js";
+import { AppError } from "../../utils/errorHandler.js";
 export default class MarketControllers {
     marketService;
     constructor() {

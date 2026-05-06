@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma.js";
-import { AppError } from "@/utils/errorHandler.js";
+import { prisma } from "../../lib/prisma.js";
+import { AppError } from "../../utils/errorHandler.js";
 export class Accountservice {
     async deposit(amount, user_id) {
         if (!amount || amount <= 0)

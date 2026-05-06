@@ -19,6 +19,12 @@ const trackedETFs = [
     { symbol: "VT", etfId: "8c0877d5-856b-426c-9309-689bb29cdbb6" }
 ];
 
+const priceStore = new Map<string, {
+    price: number,
+    symbol: string,
+    timestamp: number
+}>();
+
 const yf = new YahooFinance();
 
 /**
@@ -28,13 +34,13 @@ export function initWebSocket(server: HttpServer) {
 
     wss = new WebSocketServer({ server });
 
-    wss.on("connection", async (socket: WebSocket,req) => {
+    wss.on("connection", async (socket: WebSocket, req) => {
 
         console.log("🟢 Client connecté");
         const url = new URL(req.url!, `http://${req.headers.host}`);
         const module = url.searchParams.get("module") || "marketplace";
         console.log(module);
-        
+
         await sendLatestPrices(socket);
 
         socket.on("close", () => {
@@ -90,6 +96,13 @@ async function startPriceInterval() {
                         ? qWithMaybeFields.trailingThreeMonthReturns
                         : undefined) ?? (q as { trailingThreeMonthReturns?: unknown }).trailingThreeMonthReturns;
 
+                // Mise en cache du prix de l'etf
+                priceStore.set(q.id, {
+                    price: priceValue as number,
+                    symbol: q.symbol,
+                    timestamp: Date.now()
+                });
+
                 // Envoie pour le front
                 payload.push({
                     id: q.id,
@@ -108,13 +121,13 @@ async function startPriceInterval() {
                 });
 
                 // Enregistrement DB (seulement price)
-                await prisma.prices.create({
-                    data: {
-                        etf_id: q.id,   // ou q.etfId selon l’objet
-                        price: priceValue as number,
-                        recorded_at: new Date()
-                    }
-                });
+                // await prisma.prices.create({
+                //     data: {
+                //         etf_id: q.id,   // ou q.etfId selon l’objet
+                //         price: priceValue as number,
+                //         recorded_at: new Date()
+                //     }
+                // });
             }
 
             console.log("🟢 Broadcasting to", wss.clients.size, "clients");
@@ -143,68 +156,99 @@ function broadcast(data: any) {
 
     });
 }
- 
+
 /**
  * Send latest prices per ETF
  */
 
 async function sendLatestPrices(socket: WebSocket) {
     try {
-        // Récupère tous les ETFs suivis depuis la base
         const etfs = await prisma.exchange_traded_fund.findMany({
             select: { id: true, symbol: true, name: true }
         });
 
         if (!etfs.length) return;
 
+        // ❌ Supprimé : récupération des prix depuis la base de données
+        // const latestPrices = await Promise.all(
+        //     etfs.map(async (etf) => {
+        //         const price = await prisma.prices.findFirst({
+        //             where: { etf_id: etf.id },
+        //             orderBy: { recorded_at: "desc" }
+        //         });
+        //         ...
+        //     })
+        // );
+
+        // ✅ Prix depuis le cache mémoire uniquement
+        // Si le cache est vide (démarrage serveur), fallback Yahoo Finance
         const latestPrices = await Promise.all(
             etfs.map(async (etf) => {
-                const price = await prisma.prices.findFirst({
-                    where: { etf_id: etf.id },
-                    orderBy: { recorded_at: "desc" }
-                });
 
-                const priceWithMaybeFields = price as (typeof price & Record<string, unknown>) | null;
-                const change =
-                    priceWithMaybeFields && "change" in priceWithMaybeFields
-                        ? priceWithMaybeFields.change
-                        : null;
-                const changePercent =
-                    priceWithMaybeFields && "changePercent" in priceWithMaybeFields
-                        ? priceWithMaybeFields.changePercent
-                        : null;
-                const ytd =
-                    priceWithMaybeFields && "ytd" in priceWithMaybeFields ? priceWithMaybeFields.ytd : null;
-                const low52 =
-                    priceWithMaybeFields && "low52" in priceWithMaybeFields ? priceWithMaybeFields.low52 : null;
-                const high52 =
-                    priceWithMaybeFields && "high52" in priceWithMaybeFields ? priceWithMaybeFields.high52 : null;
-                const volume =
-                    priceWithMaybeFields && "volume" in priceWithMaybeFields ? priceWithMaybeFields.volume : null;
-                const expenseRatio =
-                    priceWithMaybeFields && "expenseRatio" in priceWithMaybeFields
-                        ? priceWithMaybeFields.expenseRatio
-                        : null;
-                const trailingThreeMonthReturns =
-                    priceWithMaybeFields && "trailingThreeMonthReturns" in priceWithMaybeFields
-                        ? priceWithMaybeFields.trailingThreeMonthReturns
-                        : null;
+                // ✅ 1. Cache mémoire
+                const cachedPrice = getPriceFromMemory(etf.id);
 
-                return {
-                    etfId: etf.id,
-                    symbol: etf.symbol,
-                    name: etf.name,
-                    price: price?.price ?? null,
-                    change: change ?? null,
-                    changePercent: changePercent ?? null,
-                    ytd: ytd ?? null,
-                    low52: low52 ?? null,
-                    high52: high52 ?? null,
-                    volume: volume ?? null,
-                    expenseRatio: expenseRatio ?? null,
-                    isDown: typeof change === "number" ? change < 0 : false,
-                    trailingThreeMonthReturns: trailingThreeMonthReturns ?? null
-                };
+                if (cachedPrice !== null) {
+                    return {
+                        etfId: etf.id,
+                        symbol: etf.symbol,
+                        name: etf.name,
+                        price: cachedPrice,
+                        change: null,
+                        changePercent: null,
+                        ytd: null,
+                        low52: null,
+                        high52: null,
+                        volume: null,
+                        expenseRatio: null,
+                        isDown: false,
+                        trailingThreeMonthReturns: null
+                    };
+                }
+
+                // ✅ 2. Fallback Yahoo Finance si cache vide/expiré
+                try {
+                    const yf = new YahooFinance();
+                    const quote = await yf.quote(etf.symbol) as any;
+
+                    const price = quote?.regularMarketPrice ?? null;
+                    const change = quote?.regularMarketChange ?? null;
+                    const changePercent = quote?.regularMarketChangePercent ?? null;
+
+                    return {
+                        etfId: etf.id,
+                        symbol: etf.symbol,
+                        name: etf.name,
+                        price,
+                        change,
+                        changePercent,
+                        ytd: quote?.trailingAnnualDividendRate ?? null,
+                        low52: quote?.fiftyTwoWeekLow ?? null,
+                        high52: quote?.fiftyTwoWeekHigh ?? null,
+                        volume: quote?.regularMarketVolume ?? null,
+                        expenseRatio: quote?.annualReportExpenseRatio ?? null,
+                        isDown: typeof change === "number" ? change < 0 : false,
+                        trailingThreeMonthReturns: quote?.trailingThreeMonthReturns ?? null
+                    };
+
+                } catch {
+                    // ETF injoignable, on renvoie null pour ne pas bloquer les autres
+                    return {
+                        etfId: etf.id,
+                        symbol: etf.symbol,
+                        name: etf.name,
+                        price: null,
+                        change: null,
+                        changePercent: null,
+                        ytd: null,
+                        low52: null,
+                        high52: null,
+                        volume: null,
+                        expenseRatio: null,
+                        isDown: false,
+                        trailingThreeMonthReturns: null
+                    };
+                }
             })
         );
 
@@ -214,7 +258,6 @@ async function sendLatestPrices(socket: WebSocket) {
         console.error("Erreur envoi derniers prix:", err);
     }
 }
-
 
 function startPortfolioSnapshotInterval() {
 
@@ -238,7 +281,7 @@ function startPortfolioSnapshotInterval() {
 
     }, 900000);
 
-} 
+}
 
 
 const getLivePrice = (res: any) => {
@@ -246,7 +289,7 @@ const getLivePrice = (res: any) => {
         case "REGULAR":
             return res.regularMarketPrice
 
-     
+
         case "CLOSED":
             return res.postMarketPrice ?? res.regularMarketPrice
 
@@ -256,4 +299,19 @@ const getLivePrice = (res: any) => {
         default:
             return res.regularMarketPrice
     }
+}
+
+
+export function getPriceFromMemory(etfId: string): number | null {
+
+    const data = priceStore.get(etfId);
+
+    if (!data) return null;
+
+    // option TTL (30s)
+    if (Date.now() - data.timestamp > 30000) {
+        return null;
+    }
+
+    return data.price;
 }

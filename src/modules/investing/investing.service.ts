@@ -4,7 +4,7 @@ import { AppError } from "@/utils/errorHandler.js";
 import YahooFinance from "yahoo-finance2";
 import { getXafToUsdRate } from "@/utils/utils.js";
 import type { UserSession } from "@/types/user.types.js";
-
+import { getPriceFromMemory } from "@/lib/websocket.js";
 export class InvestingService {
 
     /**
@@ -71,17 +71,40 @@ export class InvestingService {
             }
 
             // Price ETF
-            const lastPriceRecorded = await tx.prices.findFirst({
-                where: { etf_id },
-                orderBy: { recorded_at: "desc" }
-            });
+            //  Prix depuis la base de données supprimé
+            // const lastPriceRecorded = await tx.prices.findFirst({
+            //     where: { etf_id },
+            //     orderBy: { recorded_at: "desc" }
+            // });
+            // if (!lastPriceRecorded)
+            //     throw new AppError("Prix ETF non disponible", 406);
+            // const currentPrice = new Decimal(lastPriceRecorded.price.toString());
 
-            if (!lastPriceRecorded)
-                throw new AppError("Prix ETF non disponible", 406);
+            //  1. Cache mémoire (TTL 30s, alimenté par le WebSocket)
+            // Si tu importes : import Decimal from "decimal.js"
+            let currentPrice!: InstanceType<typeof Decimal>;
+            const cachedPrice = getPriceFromMemory(etf_id);
 
-            const currentPrice = new Decimal(
-                lastPriceRecorded.price.toString()
-            );
+            if (cachedPrice !== null) {
+                currentPrice = new Decimal(cachedPrice);
+            } else {
+                //  2. Fallback Yahoo Finance si cache vide/expiré
+                const etf = await tx.exchange_traded_fund.findUnique({
+                    where: { id: etf_id },
+                    select: { symbol: true }
+                });
+
+                if (!etf)
+                    throw new AppError("ETF introuvable", 404);
+
+                const yf = new YahooFinance();
+                const quote = await yf.quote(etf.symbol);
+
+                if (!quote?.regularMarketPrice)
+                    throw new AppError("Prix ETF non disponible", 406);
+
+                currentPrice = new Decimal(quote.regularMarketPrice);
+            }
 
             const investAmountDecimal = new Decimal(amount_to_invest);
 
@@ -153,7 +176,9 @@ export class InvestingService {
                 data: {
                     account_id: account.id,
                     amount: amount_to_invest,
-                    type: "buy"
+                    type: "buy",
+                    asset_id: etf_id,
+                    asset_type: "ETF"
                 }
             });
 
@@ -227,6 +252,7 @@ export class InvestingService {
             //     user_session.account.exchangeRate = exchangeRate;
             // }
             user_session.account.exchangeRate = rate.toNumber()
+
             return {
                 quantityBought: quantityBought.toNumber(),
                 current_price: currentPrice.toNumber(),
@@ -243,7 +269,6 @@ export class InvestingService {
             data: result
         };
     }
-
 
     static async calculatePortfolioValue(portfolioId: string) {
 

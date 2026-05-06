@@ -1,6 +1,6 @@
 // services/MarketService.ts
-import { prisma } from "@/lib/prisma.js";
-import { AppError } from "@/utils/errorHandler.js";
+import { prisma } from "../../lib/prisma.js";
+import { AppError } from "../../utils/errorHandler.js";
 import YahooFinance from "yahoo-finance2";
 class MarketService {
     async getAll() {
@@ -152,11 +152,11 @@ class MarketService {
                 close: price
             };
         })
-            .filter(Boolean);
+            .filter((p) => p !== null);
         if (!points.length)
             return [];
         const firstPrice = points[0].close;
-        return points.map(p => ({
+        return points.map((p) => ({
             x: p.date,
             y: Number(((p.close - firstPrice) / firstPrice * 100).toFixed(2))
         }));
@@ -166,7 +166,7 @@ const formatPerformance = (prices) => {
     if (!prices?.length)
         return [];
     const firstPrice = Number(prices[0].price);
-    return prices.map(p => ({
+    return prices.map((p) => ({
         x: p.recorded_at,
         y: ((Number(p.price) - firstPrice) / firstPrice) * 100
     }));

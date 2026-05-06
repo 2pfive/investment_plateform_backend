@@ -1,6 +1,6 @@
-import { AppError } from "@/utils/errorHandler.js";
+import { AppError } from "../../utils/errorHandler.js";
 import { AuthService } from "./auth.service.js";
-import { config } from "@/config/env.js";
+import { config } from "../../config/env.js";
 export class AuthControllers {
     authService;
     constructor() {

@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import { readFileSync } from "fs";
-import { config } from "@/config/env.js";
+import { config } from "../config/env.js";
 export const requireAuth = (req, res, next) => {
     const token = req.cookies[`${config.cookie_jwt_name}`];
     if (!token) {

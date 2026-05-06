@@ -1,8 +1,8 @@
-import { prisma } from "lib/prisma.js";
+import { prisma } from "../../lib/prisma.js";
 import Decimal from "decimal.js";
-import { AppError } from "@/utils/errorHandler.js";
+import { AppError } from "../../utils/errorHandler.js";
 import YahooFinance from "yahoo-finance2";
-import { getXafToUsdRate } from "@/utils/utils.js";
+import { getXafToUsdRate } from "../../utils/utils.js";
 export class InvestingService {
     /**
      * Investir par montant
@@ -154,8 +154,8 @@ export class InvestingService {
                     }
                 },
                 positions: updatedPortfolio?.positions.map(pos => ({
-                    quantity: pos.quantity,
-                    avg_buy_price: pos.avg_buy_price,
+                    quantity: pos.quantity.toNumber(),
+                    avg_buy_price: pos.avg_buy_price.toNumber(),
                     exchange_traded_fund: {
                         id: pos.exchange_traded_fund.id,
                         symbol: pos.exchange_traded_fund.symbol,
@@ -164,9 +164,9 @@ export class InvestingService {
                         category: pos.exchange_traded_fund.category,
                         region: pos.exchange_traded_fund.region,
                         risk_level: pos.exchange_traded_fund.risk_level,
-                        expense_ratio: pos.exchange_traded_fund.expense_ratio,
+                        expense_ratio: pos.exchange_traded_fund.expense_ratio?.toNumber() ?? null,
                         inception_date: pos.exchange_traded_fund.inception_date,
-                        dividend_yield: pos.exchange_traded_fund.dividend_yield
+                        dividend_yield: pos.exchange_traded_fund.dividend_yield?.toNumber() ?? null
                     }
                 })) || []
             };
@@ -175,7 +175,7 @@ export class InvestingService {
             // if (exchangeRate && user_session.account) {
             //     user_session.account.exchangeRate = exchangeRate;
             // }
-            user_session.account.exchangeRate = rate;
+            user_session.account.exchangeRate = rate.toNumber();
             return {
                 quantityBought: quantityBought.toNumber(),
                 current_price: currentPrice.toNumber(),

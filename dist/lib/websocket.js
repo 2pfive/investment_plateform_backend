@@ -1,8 +1,8 @@
 import { prisma } from "./prisma.js";
 import { WebSocketServer, WebSocket } from "ws";
 import YahooFinance from "yahoo-finance2/src/index.ts";
-import { InvestingService } from "@/modules/investing/investing.service.js";
-import MarketService from "@/modules/market/market.service.js";
+import { InvestingService } from "../modules/investing/investing.service.js";
+import MarketService from "../modules/market/market.service.js";
 let wss;
 let interval;
 let portfolioInterval;
@@ -45,27 +45,49 @@ async function startPriceInterval() {
             const quotes = await marketService.getAllQuotes();
             const payload = [];
             for (const q of quotes) {
+                const qWithMaybeFields = q;
+                const priceValue = ("price" in qWithMaybeFields ? qWithMaybeFields.price : undefined) ??
+                    q.price;
+                const changeValue = ("change" in qWithMaybeFields ? qWithMaybeFields.change : undefined) ??
+                    q.change;
+                const changePercentValue = ("changePercent" in qWithMaybeFields ? qWithMaybeFields.changePercent : undefined) ??
+                    q.changePercent;
+                const ytdValue = ("ytd" in qWithMaybeFields ? qWithMaybeFields.ytd : undefined) ??
+                    q.ytd;
+                const low52Value = ("low52" in qWithMaybeFields ? qWithMaybeFields.low52 : undefined) ??
+                    q.low52;
+                const high52Value = ("high52" in qWithMaybeFields ? qWithMaybeFields.high52 : undefined) ??
+                    q.high52;
+                const volumeValue = ("volume" in qWithMaybeFields ? qWithMaybeFields.volume : undefined) ??
+                    q.volume;
+                const expenseRatioValue = ("expenseRatio" in qWithMaybeFields ? qWithMaybeFields.expenseRatio : undefined) ??
+                    ("expense_ratio" in qWithMaybeFields ? qWithMaybeFields.expense_ratio : undefined) ??
+                    q.expenseRatio ??
+                    q.expense_ratio;
+                const trailingThreeMonthReturnsValue = ("trailingThreeMonthReturns" in qWithMaybeFields
+                    ? qWithMaybeFields.trailingThreeMonthReturns
+                    : undefined) ?? q.trailingThreeMonthReturns;
                 // Envoie pour le front
                 payload.push({
                     id: q.id,
                     symbol: q.symbol,
                     name: q.name,
-                    price: q.price,
-                    change: q.change,
-                    changePercent: q.changePercent,
-                    ytd: q.ytd,
-                    low52: q.low52,
-                    high52: q.high52,
-                    volume: q.volume,
-                    expenseRatio: q.expenseRatio,
-                    isDown: q.change < 0,
-                    trailingThreeMonthReturns: q.trailingThreeMonthReturns
+                    price: priceValue,
+                    change: changeValue,
+                    changePercent: changePercentValue,
+                    ytd: ytdValue,
+                    low52: low52Value,
+                    high52: high52Value,
+                    volume: volumeValue,
+                    expenseRatio: expenseRatioValue,
+                    isDown: typeof changeValue === "number" ? changeValue < 0 : false,
+                    trailingThreeMonthReturns: trailingThreeMonthReturnsValue
                 });
                 // Enregistrement DB (seulement price)
                 await prisma.prices.create({
                     data: {
                         etf_id: q.id, // ou q.etfId selon l’objet
-                        price: q.price,
+                        price: priceValue,
                         recorded_at: new Date()
                     }
                 });
@@ -107,20 +129,37 @@ async function sendLatestPrices(socket) {
                 where: { etf_id: etf.id },
                 orderBy: { recorded_at: "desc" }
             });
+            const priceWithMaybeFields = price;
+            const change = priceWithMaybeFields && "change" in priceWithMaybeFields
+                ? priceWithMaybeFields.change
+                : null;
+            const changePercent = priceWithMaybeFields && "changePercent" in priceWithMaybeFields
+                ? priceWithMaybeFields.changePercent
+                : null;
+            const ytd = priceWithMaybeFields && "ytd" in priceWithMaybeFields ? priceWithMaybeFields.ytd : null;
+            const low52 = priceWithMaybeFields && "low52" in priceWithMaybeFields ? priceWithMaybeFields.low52 : null;
+            const high52 = priceWithMaybeFields && "high52" in priceWithMaybeFields ? priceWithMaybeFields.high52 : null;
+            const volume = priceWithMaybeFields && "volume" in priceWithMaybeFields ? priceWithMaybeFields.volume : null;
+            const expenseRatio = priceWithMaybeFields && "expenseRatio" in priceWithMaybeFields
+                ? priceWithMaybeFields.expenseRatio
+                : null;
+            const trailingThreeMonthReturns = priceWithMaybeFields && "trailingThreeMonthReturns" in priceWithMaybeFields
+                ? priceWithMaybeFields.trailingThreeMonthReturns
+                : null;
             return {
                 etfId: etf.id,
                 symbol: etf.symbol,
                 name: etf.name,
                 price: price?.price ?? null,
-                change: price?.change ?? null,
-                changePercent: price?.changePercent ?? null,
-                ytd: price?.ytd ?? null,
-                low52: price?.low52 ?? null,
-                high52: price?.high52 ?? null,
-                volume: price?.volume ?? null,
-                expenseRatio: price?.expenseRatio ?? null,
-                isDown: price ? price.change < 0 : null,
-                trailingThreeMonthReturns: price?.trailingThreeMonthReturns ?? null
+                change: change ?? null,
+                changePercent: changePercent ?? null,
+                ytd: ytd ?? null,
+                low52: low52 ?? null,
+                high52: high52 ?? null,
+                volume: volume ?? null,
+                expenseRatio: expenseRatio ?? null,
+                isDown: typeof change === "number" ? change < 0 : false,
+                trailingThreeMonthReturns: trailingThreeMonthReturns ?? null
             };
         }));
         socket.send(JSON.stringify(latestPrices));
