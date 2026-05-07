@@ -28,7 +28,7 @@ export class AuthControllers {
 
             if (!email || !password) throw new AppError("Missing required fields email and password", 400)
             const result = await this.authService.login({ email, password })
-            AuthControllers.setCookie(res, config.cookie_jwt_name || "AUTH_TOKEN", result.token,{sameSite:"none"})
+            AuthControllers.setCookie(res, config.cookie_jwt_name || "AUTH_TOKEN", result.token)
             res.status(200).json({
                 success: true,
                 message: "connexion réussie",
