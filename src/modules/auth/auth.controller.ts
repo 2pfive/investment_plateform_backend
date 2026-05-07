@@ -14,6 +14,7 @@ export class AuthControllers {
         const defaultOptions = {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: "none",    //  CRUCIAL cross-domain
             maxAge: 86400000,
         }
 
