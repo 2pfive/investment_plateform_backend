@@ -48,3 +48,4 @@ export function normalizeQuote(quote: any) {
     changePercent: quote.changePercent != null ? +(quote.changePercent * 100).toFixed(2) : null
   };
 }
+

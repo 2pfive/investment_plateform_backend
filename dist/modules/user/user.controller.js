@@ -7,12 +7,14 @@ export class usersControllers {
     }
     async createUser(req, res) {
         try {
-            const { email, password, birth_date, phone_number } = req.body;
+            const { email, password, birth_date, phone_number, first_name, last_name } = req.body;
             const result = await this.userservice.create({
                 email,
                 password,
                 birth_date,
-                phone_number
+                phone_number,
+                last_name,
+                first_name
             });
             res.status(201).json({
                 success: true,

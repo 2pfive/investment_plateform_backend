@@ -1,5 +1,5 @@
 import { prisma } from "../../lib/prisma.js";
-import { hashPassword } from "../../utils/utils.js";
+import { hashPassword, getXafToUsdRate } from "../../utils/utils.js";
 export class UserService {
     async create(user) {
         if (!user.password) {
@@ -25,7 +25,9 @@ export class UserService {
                     password: hashedPassword,
                     phone_number: user.phone_number,
                     birth_date: new Date(user.birth_date),
-                    created_at: new Date()
+                    created_at: new Date(),
+                    first_name: user.first_name,
+                    last_name: user.last_name
                 }
             });
             // Créer compte wallet
@@ -41,13 +43,26 @@ export class UserService {
                     user_id: newUser.user_id
                 }
             });
+            const exchangeRate = await getXafToUsdRate();
             return {
-                user: {
-                    id: newUser.user_id,
-                    email: newUser.email
+                account: {
+                    id: account.id,
+                    balance: account.balance,
+                    currency: account.currency,
+                    exchangeRate: exchangeRate ?? 0.0017843916054367556,
+                    user: {
+                        user_id: newUser.user_id,
+                        email: newUser.email,
+                        phone_number: newUser.phone_number,
+                        birth_date: newUser.birth_date,
+                        first_name: newUser.first_name,
+                        last_name: newUser.last_name,
+                    }
                 },
-                account,
-                portfolio
+                portfolio: {
+                    id: portfolio.id,
+                    positions: []
+                }
             };
         });
         return result;

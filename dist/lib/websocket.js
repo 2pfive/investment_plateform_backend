@@ -15,6 +15,7 @@ const trackedETFs = [
     { symbol: "SPY", etfId: "83a63e93-8be3-4727-999f-0b26122db8ea" },
     { symbol: "VT", etfId: "8c0877d5-856b-426c-9309-689bb29cdbb6" }
 ];
+const priceStore = new Map();
 const yf = new YahooFinance();
 /**
  * Init websocket
@@ -67,6 +68,12 @@ async function startPriceInterval() {
                 const trailingThreeMonthReturnsValue = ("trailingThreeMonthReturns" in qWithMaybeFields
                     ? qWithMaybeFields.trailingThreeMonthReturns
                     : undefined) ?? q.trailingThreeMonthReturns;
+                // Mise en cache du prix de l'etf
+                priceStore.set(q.id, {
+                    price: priceValue,
+                    symbol: q.symbol,
+                    timestamp: Date.now()
+                });
                 // Envoie pour le front
                 payload.push({
                     id: q.id,
@@ -84,13 +91,13 @@ async function startPriceInterval() {
                     trailingThreeMonthReturns: trailingThreeMonthReturnsValue
                 });
                 // Enregistrement DB (seulement price)
-                await prisma.prices.create({
-                    data: {
-                        etf_id: q.id, // ou q.etfId selon l’objet
-                        price: priceValue,
-                        recorded_at: new Date()
-                    }
-                });
+                // await prisma.prices.create({
+                //     data: {
+                //         etf_id: q.id,   // ou q.etfId selon l’objet
+                //         price: priceValue as number,
+                //         recorded_at: new Date()
+                //     }
+                // });
             }
             console.log("🟢 Broadcasting to", wss.clients.size, "clients");
             broadcast(payload);
@@ -118,49 +125,84 @@ function broadcast(data) {
  */
 async function sendLatestPrices(socket) {
     try {
-        // Récupère tous les ETFs suivis depuis la base
         const etfs = await prisma.exchange_traded_fund.findMany({
             select: { id: true, symbol: true, name: true }
         });
         if (!etfs.length)
             return;
+        // ❌ Supprimé : récupération des prix depuis la base de données
+        // const latestPrices = await Promise.all(
+        //     etfs.map(async (etf) => {
+        //         const price = await prisma.prices.findFirst({
+        //             where: { etf_id: etf.id },
+        //             orderBy: { recorded_at: "desc" }
+        //         });
+        //         ...
+        //     })
+        // );
+        // ✅ Prix depuis le cache mémoire uniquement
+        // Si le cache est vide (démarrage serveur), fallback Yahoo Finance
         const latestPrices = await Promise.all(etfs.map(async (etf) => {
-            const price = await prisma.prices.findFirst({
-                where: { etf_id: etf.id },
-                orderBy: { recorded_at: "desc" }
-            });
-            const priceWithMaybeFields = price;
-            const change = priceWithMaybeFields && "change" in priceWithMaybeFields
-                ? priceWithMaybeFields.change
-                : null;
-            const changePercent = priceWithMaybeFields && "changePercent" in priceWithMaybeFields
-                ? priceWithMaybeFields.changePercent
-                : null;
-            const ytd = priceWithMaybeFields && "ytd" in priceWithMaybeFields ? priceWithMaybeFields.ytd : null;
-            const low52 = priceWithMaybeFields && "low52" in priceWithMaybeFields ? priceWithMaybeFields.low52 : null;
-            const high52 = priceWithMaybeFields && "high52" in priceWithMaybeFields ? priceWithMaybeFields.high52 : null;
-            const volume = priceWithMaybeFields && "volume" in priceWithMaybeFields ? priceWithMaybeFields.volume : null;
-            const expenseRatio = priceWithMaybeFields && "expenseRatio" in priceWithMaybeFields
-                ? priceWithMaybeFields.expenseRatio
-                : null;
-            const trailingThreeMonthReturns = priceWithMaybeFields && "trailingThreeMonthReturns" in priceWithMaybeFields
-                ? priceWithMaybeFields.trailingThreeMonthReturns
-                : null;
-            return {
-                etfId: etf.id,
-                symbol: etf.symbol,
-                name: etf.name,
-                price: price?.price ?? null,
-                change: change ?? null,
-                changePercent: changePercent ?? null,
-                ytd: ytd ?? null,
-                low52: low52 ?? null,
-                high52: high52 ?? null,
-                volume: volume ?? null,
-                expenseRatio: expenseRatio ?? null,
-                isDown: typeof change === "number" ? change < 0 : false,
-                trailingThreeMonthReturns: trailingThreeMonthReturns ?? null
-            };
+            // ✅ 1. Cache mémoire
+            const cachedPrice = getPriceFromMemory(etf.id);
+            if (cachedPrice !== null) {
+                return {
+                    etfId: etf.id,
+                    symbol: etf.symbol,
+                    name: etf.name,
+                    price: cachedPrice,
+                    change: null,
+                    changePercent: null,
+                    ytd: null,
+                    low52: null,
+                    high52: null,
+                    volume: null,
+                    expenseRatio: null,
+                    isDown: false,
+                    trailingThreeMonthReturns: null
+                };
+            }
+            //  2. Fallback Yahoo Finance si cache vide/expiré
+            try {
+                const yf = new YahooFinance();
+                const quote = await yf.quote(etf.symbol);
+                const price = quote?.regularMarketPrice ?? null;
+                const change = quote?.regularMarketChange ?? null;
+                const changePercent = quote?.regularMarketChangePercent ?? null;
+                return {
+                    etfId: etf.id,
+                    symbol: etf.symbol,
+                    name: etf.name,
+                    price,
+                    change,
+                    changePercent,
+                    ytd: quote?.trailingAnnualDividendRate ?? null,
+                    low52: quote?.fiftyTwoWeekLow ?? null,
+                    high52: quote?.fiftyTwoWeekHigh ?? null,
+                    volume: quote?.regularMarketVolume ?? null,
+                    expenseRatio: quote?.annualReportExpenseRatio ?? null,
+                    isDown: typeof change === "number" ? change < 0 : false,
+                    trailingThreeMonthReturns: quote?.trailingThreeMonthReturns ?? null
+                };
+            }
+            catch {
+                // ETF injoignable, on renvoie null pour ne pas bloquer les autres
+                return {
+                    etfId: etf.id,
+                    symbol: etf.symbol,
+                    name: etf.name,
+                    price: null,
+                    change: null,
+                    changePercent: null,
+                    ytd: null,
+                    low52: null,
+                    high52: null,
+                    volume: null,
+                    expenseRatio: null,
+                    isDown: false,
+                    trailingThreeMonthReturns: null
+                };
+            }
         }));
         socket.send(JSON.stringify(latestPrices));
     }
@@ -171,6 +213,7 @@ async function sendLatestPrices(socket) {
 function startPortfolioSnapshotInterval() {
     portfolioInterval = setInterval(async () => {
         try {
+            console.log("🟢 Snapshot portefeuilles en cours...");
             const portfolios = await prisma.portofolios.findMany({
                 select: { id: true }
             });
@@ -195,4 +238,14 @@ const getLivePrice = (res) => {
             return res.regularMarketPrice;
     }
 };
+export function getPriceFromMemory(etfId) {
+    const data = priceStore.get(etfId);
+    if (!data)
+        return null;
+    // option TTL (30s)
+    if (Date.now() - data.timestamp > 30000) {
+        return null;
+    }
+    return data.price;
+}
 //# sourceMappingURL=websocket.js.map

@@ -206,7 +206,7 @@ async function sendLatestPrices(socket: WebSocket) {
                     };
                 }
 
-                // ✅ 2. Fallback Yahoo Finance si cache vide/expiré
+                //  2. Fallback Yahoo Finance si cache vide/expiré
                 try {
                     const yf = new YahooFinance();
                     const quote = await yf.quote(etf.symbol) as any;
@@ -264,7 +264,7 @@ function startPortfolioSnapshotInterval() {
     portfolioInterval = setInterval(async () => {
 
         try {
-
+            console.log("🟢 Snapshot portefeuilles en cours...");
             const portfolios = await prisma.portofolios.findMany({
                 select: { id: true }
             });
