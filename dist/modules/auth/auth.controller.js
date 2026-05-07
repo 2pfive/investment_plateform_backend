@@ -11,7 +11,8 @@ export class AuthControllers {
     static setCookie(res, name, value, options = {}) {
         const defaultOptions = {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
+            secure: true,
+            sameSite: "none", //  CRUCIAL cross-domain
             maxAge: 86400000,
         };
         res.cookie(name, value, { ...defaultOptions, ...options });

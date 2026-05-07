@@ -10,7 +10,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start:dev": "cross-env NODE_ENV=development nodemon",
     "start:prod":"node dist/index.js",
-    "build": "prisma generate cross-env NODE_ENV=production tsc && tsc-alias"
+    "build": "prisma generate && cross-env NODE_ENV=production tsc && tsc-alias"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
