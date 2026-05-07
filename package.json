@@ -8,8 +8,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "cross-env NODE_ENV=development nodemon",
-    "build": "prisma generate cross-env NODE_ENV=production tsc && tsc-alias && node dist/index.js"
+    "start:dev": "cross-env NODE_ENV=development nodemon",
+    "start:prod":"node dist/index.js",
+    "build": "prisma generate cross-env NODE_ENV=production tsc && tsc-alias"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
