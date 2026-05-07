@@ -14,7 +14,7 @@ export class AuthControllers {
         const defaultOptions = {
             httpOnly: true,
             secure: true,
-            sameSite: "none",    //  CRUCIAL cross-domain
+            sameSite: "None",    //  CRUCIAL cross-domain
             maxAge: 86400000,
         }
 
