@@ -1,6 +1,6 @@
 import { AppError } from "@/utils/errorHandler.js"
 import { AuthService } from "./auth.service.js"
-import { Response, Request } from "express"
+import { Response, Request, CookieOptions } from "express"
 import { config } from "@/config/env.js"
 
 export class AuthControllers {
@@ -10,11 +10,11 @@ export class AuthControllers {
         this.loginController = this.loginController.bind(this)
         this.verifyCurrentUser = this.verifyCurrentUser.bind(this)
     }
-    static setCookie(res: Response, name: string, value: any, options: any = {}) {
-        const defaultOptions = {
+    static setCookie(res: Response, name: string, value: any, options: CookieOptions = {}) {
+        const defaultOptions: CookieOptions = {
             httpOnly: true,
             secure: true,
-            sameSite: "None",    //  CRUCIAL cross-domain
+            sameSite: "none",    //  CRUCIAL cross-domain
             maxAge: 86400000,
         }
 
