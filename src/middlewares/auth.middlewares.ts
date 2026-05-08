@@ -6,8 +6,10 @@ import { config } from "@/config/env.js";
 export const requireAuth = (req:Request, res:Response, next:NextFunction) => {
 
     const token = req.cookies[`${config.cookie_jwt_name}`];
-
+    console.log("################### TOKEN #############",token);
+    
     if (!token) {
+        console.log("################### TOKEN INVALIDE OU MANQUANT #############");
         return res.status(401).json({ error: 'Token manquant ou invalide' });
     }
 

@@ -18,6 +18,7 @@ const app=express()
 const server=http.createServer(app)
 
 app.use(cors(config.corsOptions))
+app.set("trust proxy", 1)
 
 app.use(express.json())
 
@@ -33,7 +34,7 @@ app.get('/health',(req,res)=>{
   res.status(200).json({message:'OK',timestamp:new Date().toISOString()})
 })
 
-server.listen(config.port,()=>{
+server.listen(config.port,'0.0.0.0',()=>{
     console.log('serveur lancé sur le port',"http://localhost:"+config.port);
     console.log(process.env.ORIGINS);
     console.log(config);

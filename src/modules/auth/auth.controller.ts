@@ -13,11 +13,11 @@ export class AuthControllers {
     static setCookie(res: Response, name: string, value: any, options: CookieOptions = {}) {
         const defaultOptions: CookieOptions = {
             httpOnly: true,
-            secure: true,
-            sameSite: "none",    //  CRUCIAL cross-domain
             maxAge: 86400000,
+            secure:true,
+            sameSite:"none"
         }
-
+        console.log("############ Token envoyé #################");
         res.cookie(name, value, { ...defaultOptions, ...options })
     }
 
@@ -29,6 +29,7 @@ export class AuthControllers {
             if (!email || !password) throw new AppError("Missing required fields email and password", 400)
             const result = await this.authService.login({ email, password })
             AuthControllers.setCookie(res, config.cookie_jwt_name || "AUTH_TOKEN", result.token)
+           
             res.status(200).json({
                 success: true,
                 message: "connexion réussie",
