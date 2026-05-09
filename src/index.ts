@@ -34,7 +34,7 @@ app.get('/health',(req,res)=>{
   res.status(200).json({message:'OK',timestamp:new Date().toISOString()})
 })
 
-server.listen(config.port,'0.0.0.0',()=>{
+server.listen(config.port,()=>{
     console.log('serveur lancé sur le port',"http://localhost:"+config.port);
     console.log(process.env.ORIGINS);
     console.log(config);
