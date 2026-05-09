@@ -14,8 +14,8 @@ export class AuthControllers {
         const defaultOptions: CookieOptions = {
             httpOnly: true,
             maxAge: 86400000,
-            secure:true,
-            sameSite:"none"
+            secure: process.env.NODE_ENV === "production",
+            sameSite:"lax"
         }
         console.log("############ Token envoyé #################");
         res.cookie(name, value, { ...defaultOptions, ...options })
