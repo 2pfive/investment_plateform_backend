@@ -11,11 +11,12 @@ export class AuthControllers {
         this.verifyCurrentUser = this.verifyCurrentUser.bind(this)
     }
     static setCookie(res: Response, name: string, value: any, options: CookieOptions = {}) {
+        const isProduction=process.env.NODE_ENV === "production"
         const defaultOptions: CookieOptions = {
             httpOnly: true,
             maxAge: 86400000,
-            secure: process.env.NODE_ENV === "production",
-            sameSite:"lax"
+            secure: isProduction,
+            sameSite:isProduction?"none":"lax"
         }
         console.log("############ Token envoyé #################");
         res.cookie(name, value, { ...defaultOptions, ...options })
@@ -33,7 +34,8 @@ export class AuthControllers {
             res.status(200).json({
                 success: true,
                 message: "connexion réussie",
-                data: result.user_session
+                data: result.user_session,
+                token:result.token
             })
         } catch (error: unknown) {
             if (error instanceof AppError) {
