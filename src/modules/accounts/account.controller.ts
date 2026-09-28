@@ -50,17 +50,31 @@ export class AccountControllers {
         }
     }
 
+    /**
+     * SÉCURITÉ — correctif du 2026-08-31.
+     *
+     * `user_id` était lu depuis `req.body`. N'importe quel utilisateur
+     * authentifié pouvait donc consulter le solde et les positions de
+     * n'importe quel autre en envoyant son identifiant dans le corps de la
+     * requête — référence directe d'objet non sécurisée (IDOR).
+     *
+     * L'identité provient désormais exclusivement du token vérifié.
+     */
     async getUserBalance(req: Request, res: Response) {
         try {
-            const { user_id } = req.body
+            const user_id = req.user?.user_id
+
+            if (!user_id) {
+                throw new AppError("Authentification requise", 401)
+            }
+
             const result = await this.accountService.getBalance(user_id)
-            res.status(200).json({
+            return res.status(200).json({
                 success: true,
                 data: result
             })
 
         } catch (error: any) {
-            console.log(error);
             if (error instanceof AppError) {
                 return res.status(error.statusCode).json({
                     success: false,

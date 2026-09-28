@@ -4,6 +4,8 @@ import investingRouter from "../modules/investing/investing.router.js"
 import BillingRouter from "../modules/accounts/account.router.js"
 import AuthRouter from "../modules/auth/auth.router.js"
 import MarketRouter from "../modules/market/market.router.js"
+import BrokerRouter from "../modules/broker/broker.router.js"
+import OrderRouter from "../modules/orders/order.router.js"
 
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma.js";
@@ -17,6 +19,9 @@ router.use("/investing",requireAuth,investingRouter)
 router.use("/billing",requireAuth,BillingRouter)
 router.use('/auth',AuthRouter)
 router.use('/market',MarketRouter)
+// Authentification route par route : le rappel OAuth est public.
+router.use('/broker',BrokerRouter)
+router.use('/orders',requireAuth,OrderRouter)
 
 
 router.get('/etf', async (req: Request, res: Response) => {

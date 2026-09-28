@@ -9,8 +9,11 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start:dev": "cross-env NODE_ENV=development nodemon",
-    "start:prod":"node dist/index.js",
-    "build": "prisma generate && cross-env NODE_ENV=production tsc && tsc-alias"
+    "start:prod": "node dist/index.js",
+    "build": "prisma generate && cross-env NODE_ENV=production tsc && tsc-alias",
+    "keys:rotate": "node scripts/rotate-jwt-keys.cjs .",
+    "verify:broker": "tsx scripts/verify-broker-oauth.ts",
+    "verify:orders": "tsx scripts/verify-orders.ts"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",

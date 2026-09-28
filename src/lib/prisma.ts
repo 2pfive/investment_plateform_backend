@@ -11,8 +11,7 @@ const globalForPrisma = global as unknown as {
   prisma: PrismaClient | undefined
 }
 
-console.log("DATABASE URL",process.env.DATABASE_URL);
-
+// L'URL de connexion contient les identifiants Postgres : jamais journalisee.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 })

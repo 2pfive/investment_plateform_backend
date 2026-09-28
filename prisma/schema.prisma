@@ -1,3 +1,23 @@
+// =============================================================================
+// AMARA — schéma Prisma
+//
+// Phase 2 : refonte ADDITIVE.
+//
+// Règles appliquées ici (validées le 2026-08-31) :
+//   1. Les 5 schémas PostgreSQL existants sont conservés.
+//   2. Les 10 modèles existants gardent LEUR NOM PRISMA ET LEUR NOM DE TABLE,
+//      afin que le backend web actuel continue de compiler et de fonctionner.
+//      Le renommage (portofolios -> Portfolio, etc.) interviendra à l'étape 3,
+//      en même temps que la réécriture des services.
+//   3. Tout ajout sur un modèle existant est nullable ou pourvu d'un défaut.
+//   4. Aucune colonne n'est supprimée, aucune n'est rétrécie.
+//      Seules des précisions Decimal sont ÉLARGIES (non destructif en Postgres).
+//   5. Les nouveaux modèles suivent la convention cible : modèle PascalCase,
+//      champs camelCase, table et colonnes snake_case via @map / @@map.
+//
+// Voir docs/DATABASE.md pour le détail des décisions.
+// =============================================================================
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,30 +27,69 @@ datasource db {
   schemas  = ["account", "auth", "billing", "investing", "market_data"]
 }
 
+// =============================================================================
+// AUTH
+// =============================================================================
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model user {
-  id           Int           @id @default(autoincrement()) @map("_id")
-  user_id      String?       @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  phone_number String        @db.VarChar(15)
-  birth_date   DateTime      @db.Date
-  email        String        @unique
+  id           Int       @id @default(autoincrement()) @map("_id")
+  user_id      String?   @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone_number String    @db.VarChar(15)
+  birth_date   DateTime  @db.Date
+  email        String    @unique
   password     String
-  is_active    Boolean?      @default(true)
-  created_at   DateTime?     @db.Timestamptz(6)
-  first_name   String?       @db.VarChar(100)
-  last_name    String?       @db.VarChar(100)
-  accounts     accounts[]
-  portofolios  portofolios[]
+  is_active    Boolean?  @default(true)
+  created_at   DateTime? @db.Timestamptz(6)
+  first_name   String?   @db.VarChar(100)
+  last_name    String?   @db.VarChar(100)
+
+  // --- AJOUTS Phase 2 (tous nullables ou avec défaut) ---
+  updated_at DateTime? @updatedAt @db.Timestamptz(6)
+  kyc_status KycStatus @default(NOT_STARTED)
+  country    String?   @db.VarChar(2)
+
+  accounts          accounts[]
+  portofolios       portofolios[]
+  orders            Order[]
+  brokerConnections BrokerConnection[]
+  oauthStates       OAuthState[]
+  idempotencyKeys   IdempotencyKey[]
 
   @@schema("auth")
 }
 
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  REJECTED
+
+  @@schema("auth")
+}
+
+// =============================================================================
+// BILLING — comptes et grand livre
+// =============================================================================
+
 model accounts {
-  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id      String         @db.Uuid
-  balance      Decimal?       @default(0) @db.Decimal(12, 4)
-  created_at   DateTime?      @default(now()) @db.Timestamptz(6)
-  currency     String?        @default("XAF") @db.VarChar(8)
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String    @db.Uuid
+  // Précision élargie : Decimal(12,4) -> Decimal(24,8)
+  balance    Decimal?  @default(0) @db.Decimal(24, 8)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  currency   String?   @default("XAF") @db.VarChar(8)
+
+  // --- AJOUTS Phase 2 ---
+  // ATTENTION : depuis le passage à Alpaca OAuth, ce compte n'est PLUS la
+  // source de financement des ordres. Le cash et le buying power vivent dans
+  // le compte de courtage de l'utilisateur chez Alpaca, pas ici.
+  // Cette colonne reste en place pour le futur wallet XAF AMARA (dépôts /
+  // retraits, hors périmètre du MVP) et ne doit pas être lue par
+  // InvestmentService.
+  reserved_balance Decimal   @default(0) @db.Decimal(24, 8)
+  updated_at       DateTime? @updatedAt @db.Timestamptz(6)
+
   user         user           @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_accounts_user")
   transactions transactions[]
 
@@ -42,43 +101,510 @@ model accounts {
 model transactions {
   id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   account_id String            @db.Uuid
-  amount     Decimal           @db.Decimal(12, 4)
+  // Précision élargie : Decimal(12,4) -> Decimal(24,8)
+  amount     Decimal           @db.Decimal(24, 8)
   type       transaction_type? @default(buy)
   created_at DateTime?         @default(now()) @db.Timestamptz(6)
   asset_type String?           @db.VarChar(50)
+  // Conservé tel quel (UUID sans FK) pour ne pas casser l'existant.
+  // Le rattachement propre passe désormais par order_id -> Order.assetId.
   asset_id   String?           @db.Uuid
-  accounts   accounts          @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_transactions_account")
+
+  // --- AJOUTS Phase 2 ---
+  status             TransactionStatus @default(COMPLETED)
+  currency           Currency          @default(XAF)
+  fee                Decimal           @default(0) @db.Decimal(24, 8)
+  /// Référence interne AMARA, unique, idempotente.
+  reference          String?           @unique @db.VarChar(64)
+  /// Référence chez le tiers : brokerOrderId Alpaca, id de transaction PSP…
+  external_reference String?           @db.VarChar(128)
+  order_id           String?           @db.Uuid
+  metadata           Json?
+  updated_at         DateTime?         @updatedAt @db.Timestamptz(6)
+
+  accounts accounts @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_transactions_account")
+  order    Order?   @relation(fields: [order_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_transactions_order")
 
   @@index([account_id], map: "idx_transactions_account_id")
+  @@index([order_id], map: "idx_transactions_order_id")
+  @@index([external_reference], map: "idx_transactions_external_reference")
   @@schema("billing")
 }
 
+enum transaction_type {
+  buy
+  sell
+  deposit
+  withdraw
+  // --- AJOUTS Phase 2 (ALTER TYPE ... ADD VALUE, purement additif) ---
+  fee
+  dividend
+  adjustment
+
+  @@schema("billing")
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+
+  @@schema("billing")
+}
+
+enum Currency {
+  XAF
+  USD
+  EUR
+
+  @@schema("billing")
+}
+
+// =============================================================================
+// INVESTING — portefeuille, positions, ordres
+// =============================================================================
+
 model portofolios {
-  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id    String      @db.Uuid
-  created_at DateTime?   @default(now()) @db.Timestamptz(6)
-  user       user        @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_portofolios_user")
-  positions  positions[]
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String    @db.Uuid
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  // --- AJOUTS Phase 2 ---
+  base_currency Currency  @default(XAF)
+  total_value   Decimal?  @db.Decimal(24, 8)
+  updated_at    DateTime? @updatedAt @db.Timestamptz(6)
+
+  user      user                   @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_portofolios_user")
+  positions positions[]
+  orders    Order[]
+  snapshots portofolio_snapshots[]
 
   @@index([user_id], map: "idx_portofolios_user_id")
   @@schema("investing")
 }
 
 model positions {
-  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  portofolio_id        String               @db.Uuid
-  etf_id               String               @db.Uuid
-  quantity             Decimal              @db.Decimal(12, 4)
-  avg_buy_price        Decimal              @db.Decimal(12, 4)
-  created_at           DateTime?            @default(now()) @db.Timestamptz(6)
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portofolio_id String    @db.Uuid
+  etf_id        String    @db.Uuid
+  // Précision élargie : Decimal(12,4) -> Decimal(24,9).
+  // 4 décimales rendaient l'investissement fractionné impossible sur les
+  // titres chers (la quantité tombait à 0.0000). 9 décimales = limite Alpaca.
+  quantity      Decimal   @db.Decimal(24, 9)
+  // Précision élargie : Decimal(12,4) -> Decimal(24,8)
+  avg_buy_price Decimal   @db.Decimal(24, 8)
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  // --- AJOUTS Phase 2 ---
+  /// Nouveau rattachement générique STOCK+ETF. Nullable le temps du backfill ;
+  /// deviendra obligatoire à l'étape 3, quand etf_id sera retiré.
+  asset_id        String?   @db.Uuid
+  currency        Currency  @default(USD)
+  current_price   Decimal?  @db.Decimal(24, 8)
+  market_value    Decimal?  @db.Decimal(24, 8)
+  unrealized_pnl  Decimal?  @db.Decimal(24, 8)
+  realized_pnl    Decimal   @default(0) @db.Decimal(24, 8)
+  /// Réconciliation : quantité vue chez le broker au dernier passage du worker.
+  broker_quantity Decimal?  @db.Decimal(24, 9)
+  last_synced_at  DateTime? @db.Timestamptz(6)
+  updated_at      DateTime? @updatedAt @db.Timestamptz(6)
+
   exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_positions_etf")
   portofolios          portofolios          @relation(fields: [portofolio_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_positions_portofolio")
+  asset                Asset?               @relation(fields: [asset_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_positions_asset")
 
+  // Empêche les doublons produits par le findFirst + create actuel.
+  // La migration DOIT dédupliquer avant de poser cette contrainte.
+  @@unique([portofolio_id, etf_id], map: "uq_positions_portofolio_etf")
   @@index([etf_id], map: "idx_positions_etf_id")
   @@index([portofolio_id], map: "idx_positions_portofolio_id")
+  @@index([asset_id], map: "idx_positions_asset_id")
   @@schema("investing")
 }
 
+model portofolio_snapshots {
+  id               BigInt   @id @default(autoincrement())
+  portofolio_id    String   @db.Uuid
+  portofolio_value Decimal  @db.Decimal(24, 8)
+  invested_amount  Decimal? @db.Decimal(24, 8)
+  recorded_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  // --- AJOUTS Phase 2 ---
+  currency     Currency @default(XAF)
+  cash_balance Decimal? @db.Decimal(24, 8)
+
+  // La relation manquait totalement : portofolio_id était un UUID orphelin.
+  // La migration DOIT purger les orphelins avant de poser la contrainte.
+  portofolios portofolios @relation(fields: [portofolio_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_portofolio_snapshots_portofolio")
+
+  @@index([portofolio_id, recorded_at], map: "idx_portofolio_snapshots_portofolio_recorded")
+  @@schema("investing")
+}
+
+// -----------------------------------------------------------------------------
+// Order — le modèle central absent du schéma d'origine.
+//
+// Un ordre porte DEUX devises : l'intention utilisateur (10 000 XAF) et ce qui
+// part réellement chez le broker (17,68 USD), plus le taux appliqué. Sans cela
+// un ordre n'est pas auditable a posteriori.
+// -----------------------------------------------------------------------------
+model Order {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId             String  @map("user_id") @db.Uuid
+  portfolioId        String  @map("portfolio_id") @db.Uuid
+  assetId            String  @map("asset_id") @db.Uuid
+  brokerConnectionId String? @map("broker_connection_id") @db.Uuid
+
+  side        OrderSide
+  orderType   OrderType   @default(MARKET) @map("order_type")
+  timeInForce TimeInForce @default(DAY) @map("time_in_force")
+  status      OrderStatus @default(CREATED)
+
+  /// Ce que l'utilisateur a demandé, dans SA devise.
+  requestedAmount   Decimal  @map("requested_amount") @db.Decimal(24, 8)
+  requestedCurrency Currency @map("requested_currency")
+
+  /// Ce qui part chez le broker, dans la devise de cotation.
+  notional        Decimal? @db.Decimal(24, 8)
+  tradingCurrency Currency @default(USD) @map("trading_currency")
+
+  /// Renseigné à la place de notional pour un ordre exprimé en quantité.
+  quantity   Decimal? @db.Decimal(24, 9)
+  limitPrice Decimal? @map("limit_price") @db.Decimal(24, 8)
+  stopPrice  Decimal? @map("stop_price") @db.Decimal(24, 8)
+
+  /// Taux figé au moment de l'ordre + lien vers la cotation historisée.
+  fxRate   Decimal? @map("fx_rate") @db.Decimal(24, 12)
+  fxRateId String?  @map("fx_rate_id") @db.Uuid
+
+  fee Decimal @default(0) @db.Decimal(24, 8)
+
+  /// Généré CÔTÉ SERVEUR (AMARA-{userId8}-{uuid}), jamais fourni par le client.
+  /// C'est la garantie d'idempotence vis-à-vis du broker.
+  clientOrderId String  @unique @map("client_order_id") @db.VarChar(128)
+  brokerOrderId String? @unique @map("broker_order_id") @db.VarChar(128)
+
+  filledQuantity     Decimal  @default(0) @map("filled_quantity") @db.Decimal(24, 9)
+  averageFilledPrice Decimal? @map("average_filled_price") @db.Decimal(24, 8)
+
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(6)
+  filledAt    DateTime? @map("filled_at") @db.Timestamptz(6)
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  failureCode    String? @map("failure_code") @db.VarChar(64)
+  failureMessage String? @map("failure_message")
+
+  lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user             user              @relation(fields: [userId], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orders_user")
+  portfolio        portofolios       @relation(fields: [portfolioId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orders_portfolio")
+  asset            Asset             @relation(fields: [assetId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orders_asset")
+  brokerConnection BrokerConnection? @relation(fields: [brokerConnectionId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orders_broker_connection")
+  fxRateRef        FxRate?           @relation(fields: [fxRateId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orders_fx_rate")
+
+  events       OrderEvent[]
+  transactions transactions[]
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_orders_user_created")
+  @@index([status], map: "idx_orders_status")
+  @@index([portfolioId], map: "idx_orders_portfolio")
+  @@index([assetId], map: "idx_orders_asset")
+  @@map("orders")
+  @@schema("investing")
+}
+
+/// Journal append-only des transitions de statut d'un ordre.
+/// Sans lui, aucune traçabilité des exécutions partielles ni des rejets.
+model OrderEvent {
+  id      String @id @default(uuid()) @db.Uuid
+  orderId String @map("order_id") @db.Uuid
+
+  fromStatus OrderStatus?     @map("from_status")
+  toStatus   OrderStatus      @map("to_status")
+  source     OrderEventSource @default(AMARA)
+
+  /// Statut brut renvoyé par le broker, conservé tel quel pour l'audit.
+  brokerStatusRaw String? @map("broker_status_raw") @db.VarChar(64)
+  payload         Json?
+
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_order_events_order")
+
+  @@index([orderId, occurredAt], map: "idx_order_events_order_occurred")
+  @@map("order_events")
+  @@schema("investing")
+}
+
+/// Connexion OAuth entre un utilisateur AMARA et SON PROPRE compte de
+/// courtage Alpaca.
+///
+/// AMARA ne détient aucun titre et aucune liquidité : le compte de courtage
+/// appartient à l'utilisateur. AMARA ne dispose que d'une autorisation OAuth
+/// pour agir en son nom.
+///
+/// Contrainte forte relevée dans la documentation Alpaca : la réponse du token
+/// endpoint ne contient QUE access_token, token_type et scope. Il n'y a
+/// ni expires_in, ni refresh_token. Conséquences directes sur ce modèle :
+///   * le jeton est une CRÉDENTIELLE LONGUE DURÉE, d'où le chiffrement
+///     obligatoire au repos (jamais de colonne en clair) ;
+///   * refreshToken et tokenExpiresAt sont modélisés mais NULLABLES et
+///     inutilisés en MVP — ils n'existent que si Alpaca les introduit ;
+///   * la seule voie de récupération après EXPIRED/REVOKED est une
+///     RÉ-AUTORISATION complète, pas un rafraîchissement.
+model BrokerConnection {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId      String                 @map("user_id") @db.Uuid
+  provider    BrokerProviderKind     @default(ALPACA_OAUTH)
+  environment BrokerEnvironment      @default(PAPER)
+  status      BrokerConnectionStatus @default(CONNECTING)
+
+  /// Identifiant du compte Alpaca de l'utilisateur, récupéré après connexion.
+  externalAccountId String?  @map("external_account_id") @db.VarChar(128)
+  /// 4 derniers caractères, seule partie affichable côté mobile.
+  accountLast4      String?  @map("account_last4") @db.VarChar(8)
+  currency          Currency @default(USD)
+
+  /// Jeton chiffré (AES-256-GCM : iv + tag + ciphertext encodés ensemble).
+  /// AUCUNE colonne ne contient le jeton en clair, à aucun moment.
+  accessTokenCiphertext  String? @map("access_token_ciphertext")
+  /// Identifie la clé de chiffrement utilisée — permet la rotation.
+  encryptionKeyId        String? @map("encryption_key_id") @db.VarChar(32)
+  /// SHA-256 du jeton. Permet de détecter qu'une même autorisation couvre
+  /// plusieurs environnements, et de tracer sans jamais logger le secret.
+  accessTokenFingerprint String? @map("access_token_fingerprint") @db.VarChar(64)
+
+  /// Scopes réellement accordés, tels que renvoyés par Alpaca.
+  scope String? @db.VarChar(255)
+
+  /// Modélisés par prudence, non utilisés en MVP : Alpaca ne les documente pas.
+  refreshTokenCiphertext String?   @map("refresh_token_ciphertext")
+  tokenExpiresAt         DateTime? @map("token_expires_at") @db.Timestamptz(6)
+
+  connectedAt  DateTime? @map("connected_at") @db.Timestamptz(6)
+  lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  lastErrorAt  DateTime? @map("last_error_at") @db.Timestamptz(6)
+  lastErrorMsg String?   @map("last_error_msg")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user   user    @relation(fields: [userId], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_broker_connections_user")
+  orders Order[]
+
+  /// Une seule connexion active par utilisateur, fournisseur et environnement.
+  /// Sépare strictement paper et live : jamais de mélange d'endpoints.
+  @@unique([userId, provider, environment], map: "uq_broker_connections_user_provider_env")
+  @@index([status], map: "idx_broker_connections_status")
+  @@index([externalAccountId], map: "idx_broker_connections_external_account")
+  @@map("broker_connections")
+  @@schema("investing")
+}
+
+/// State OAuth à usage unique.
+///
+/// Le brief impose un state cryptographiquement aléatoire, lié à l'utilisateur,
+/// jamais statique. Il doit donc être persisté pour être vérifié au callback :
+/// le processus qui reçoit le callback n'est pas forcément celui qui a généré
+/// l'URL d'autorisation.
+model OAuthState {
+  id     String @id @default(uuid()) @db.Uuid
+  /// Valeur aléatoire (32 octets, base64url). Unique et à usage unique.
+  state  String @unique @db.VarChar(128)
+  userId String @map("user_id") @db.Uuid
+
+  provider    BrokerProviderKind @default(ALPACA_OAUTH)
+  environment BrokerEnvironment  @default(PAPER)
+  /// `redirect_uri` transmis au courtier. Conservé tel quel : l'échange du
+  /// code exige la valeur exacte de l'autorisation, même si la configuration
+  /// a changé entre-temps.
+  redirectUri String             @map("redirect_uri") @db.VarChar(512)
+  /// Où renvoyer l'appareil une fois l'échange terminé (`amara://…`).
+  /// Validé contre une liste blanche AVANT d'être enregistré : relu au
+  /// rappel, il n'est plus contrôlé — c'est ici que se joue la redirection
+  /// ouverte. Nullable pour les states créés avant cette colonne.
+  returnUrl   String?            @map("return_url") @db.VarChar(512)
+
+  /// Horodaté à la consommation : un state déjà utilisé est refusé (rejeu).
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user user @relation(fields: [userId], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_oauth_states_user")
+
+  @@index([userId], map: "idx_oauth_states_user")
+  @@index([expiresAt], map: "idx_oauth_states_expires")
+  @@map("oauth_states")
+  @@schema("investing")
+}
+
+/// Garde-fou contre la double soumission : deux POST /investing portant la même
+/// clé renvoient le MÊME ordre, sans jamais créer un second ordre Alpaca.
+model IdempotencyKey {
+  id     String @id @default(uuid()) @db.Uuid
+  key    String @db.VarChar(128)
+  userId String @map("user_id") @db.Uuid
+
+  endpoint    String @db.VarChar(128)
+  /// Hash du corps de requête : détecte une réutilisation de clé sur un
+  /// contenu différent, qui doit être rejetée et non rejouée.
+  requestHash String @map("request_hash") @db.VarChar(64)
+
+  status       IdempotencyStatus @default(IN_PROGRESS)
+  resourceType String?           @map("resource_type") @db.VarChar(64)
+  resourceId   String?           @map("resource_id") @db.Uuid
+  responseBody Json?             @map("response_body")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  user user @relation(fields: [userId], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_idempotency_keys_user")
+
+  @@unique([userId, key], map: "uq_idempotency_keys_user_key")
+  @@index([expiresAt], map: "idx_idempotency_keys_expires")
+  @@map("idempotency_keys")
+  @@schema("investing")
+}
+
+/// Divergence constatée entre l'état AMARA et l'état broker.
+/// Rien n'est jamais corrigé silencieusement : on trace, on alerte.
+model ReconciliationLog {
+  id String @id @default(uuid()) @db.Uuid
+
+  scope      ReconciliationScope
+  entityType String              @map("entity_type") @db.VarChar(64)
+  entityId   String?             @map("entity_id") @db.VarChar(128)
+
+  expected Json?
+  actual   Json?
+  note     String?
+
+  status     ReconciliationStatus @default(OPEN)
+  detectedAt DateTime             @default(now()) @map("detected_at") @db.Timestamptz(6)
+  resolvedAt DateTime?            @map("resolved_at") @db.Timestamptz(6)
+
+  @@index([scope, status], map: "idx_reconciliation_logs_scope_status")
+  @@index([detectedAt], map: "idx_reconciliation_logs_detected")
+  @@map("reconciliation_logs")
+  @@schema("investing")
+}
+
+enum OrderSide {
+  BUY
+  SELL
+
+  @@schema("investing")
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP
+  STOP_LIMIT
+
+  @@schema("investing")
+}
+
+enum TimeInForce {
+  DAY
+  GTC
+
+  @@schema("investing")
+}
+
+enum OrderStatus {
+  CREATED
+  SUBMITTED
+  ACCEPTED
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  REJECTED
+  EXPIRED
+  FAILED
+
+  @@schema("investing")
+}
+
+enum OrderEventSource {
+  AMARA
+  BROKER
+  WORKER
+
+  @@schema("investing")
+}
+
+enum BrokerProviderKind {
+  /// Phase actuelle : l'utilisateur connecte SON compte Alpaca via OAuth.
+  ALPACA_OAUTH
+  /// Plus tard : les comptes de courtage sont ouverts sous l'application AMARA.
+  ALPACA_BROKER
+  MOCK
+
+  @@schema("investing")
+}
+
+enum BrokerEnvironment {
+  PAPER
+  LIVE
+
+  @@schema("investing")
+}
+
+enum BrokerConnectionStatus {
+  NOT_CONNECTED
+  CONNECTING
+  CONNECTED
+  EXPIRED
+  REVOKED
+  ERROR
+
+  @@schema("investing")
+}
+
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+
+  @@schema("investing")
+}
+
+enum ReconciliationScope {
+  ORDER
+  POSITION
+  ACCOUNT
+  PORTFOLIO
+
+  @@schema("investing")
+}
+
+enum ReconciliationStatus {
+  OPEN
+  RESOLVED
+  IGNORED
+
+  @@schema("investing")
+}
+
+// =============================================================================
+// MARKET_DATA
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// LEGACY — conservé intact tant que le frontend web n'a pas migré.
+// Remplacé fonctionnellement par Asset + EtfMetadata.
+// -----------------------------------------------------------------------------
 model exchange_traded_fund {
   id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   symbol                 String         @db.VarChar(50)
@@ -101,13 +627,16 @@ model exchange_traded_fund {
   etf_dividend           etf_dividend[]
   etf_holding            etf_holding[]
   prices                 prices[]
+  asset                  Asset?
 
   @@schema("market_data")
 }
 
+/// LEGACY — un seul champ price, plus alimenté depuis que l'INSERT du worker a
+/// été commenté. Remplacé par MarketPrice (OHLCV + intervalle + source).
 model prices {
   etf_id               String               @db.Uuid
-  price                Decimal              @db.Decimal(12, 4)
+  price                Decimal              @db.Decimal(24, 8)
   recorded_at          DateTime             @default(now()) @db.Timestamptz(6)
   exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_prices_etf")
 
@@ -116,24 +645,15 @@ model prices {
   @@schema("market_data")
 }
 
-model portofolio_snapshots {
-  id               BigInt   @id @default(autoincrement())
-  portofolio_id    String   @db.Uuid
-  portofolio_value Decimal  @db.Decimal(18, 2)
-  invested_amount  Decimal? @db.Decimal(18, 2)
-  recorded_at      DateTime @default(now()) @db.Timestamptz(6)
-
-  @@schema("investing")
-}
-
 model etf_dividend {
   id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   etf_id               String               @db.Uuid
-  amount               Decimal              @db.Decimal(10, 4)
+  amount               Decimal              @db.Decimal(24, 8)
   currency             String               @db.VarChar(10)
   pay_date             DateTime             @db.Date
   exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_etf_div")
 
+  @@index([etf_id, pay_date], map: "idx_etf_dividend_etf_pay_date")
   @@schema("market_data")
 }
 
@@ -142,17 +662,162 @@ model etf_holding {
   etf_id               String               @db.Uuid
   name                 String               @db.VarChar(100)
   symbol               String?              @db.VarChar(20)
-  weight               Decimal              @db.Decimal(5, 2)
+  // Précision élargie : Decimal(5,2) -> Decimal(9,6)
+  weight               Decimal              @db.Decimal(9, 6)
   exchange_traded_fund exchange_traded_fund @relation(fields: [etf_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_etf")
+
+  @@index([etf_id], map: "idx_etf_holding_etf_id")
+  @@schema("market_data")
+}
+
+// -----------------------------------------------------------------------------
+// Asset — modèle générique STOCK + ETF.
+//
+// exchange_traded_fund ne pouvait pas représenter une action : 8 de ses
+// colonnes sont spécifiques aux ETF. Elles partent dans EtfMetadata, et Asset
+// ne garde que ce qui est vrai pour les deux.
+// -----------------------------------------------------------------------------
+model Asset {
+  id String @id @default(uuid()) @db.Uuid
+
+  symbol    String      @unique @db.VarChar(32)
+  name      String
+  assetType AssetType   @map("asset_type")
+  exchange  String?     @db.VarChar(32)
+  currency  Currency    @default(USD)
+  isin      String?     @db.VarChar(20)
+  status    AssetStatus @default(ACTIVE)
+
+  /// Renseignés par la synchro broker : sans eux, impossible de savoir si un
+  /// actif peut être acheté, et encore moins en fraction.
+  tradable     Boolean @default(false)
+  fractionable Boolean @default(false)
+  shortable    Boolean @default(false)
+
+  logoUrl     String? @map("logo_url")
+  description String?
+
+  /// Identifiant de l'actif chez le broker (Alpaca asset id).
+  brokerAssetId String? @map("broker_asset_id") @db.VarChar(128)
+  /// Correspondance vers la table historique, le temps de la coexistence.
+  legacyEtfId   String? @unique @map("legacy_etf_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  legacyEtf   exchange_traded_fund? @relation(fields: [legacyEtfId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_assets_legacy_etf")
+  etfMetadata EtfMetadata?
+  prices      MarketPrice[]
+  positions   positions[]
+  orders      Order[]
+
+  @@index([assetType, status], map: "idx_assets_type_status")
+  @@index([tradable], map: "idx_assets_tradable")
+  @@map("assets")
+  @@schema("market_data")
+}
+
+/// Les colonnes qui seraient systématiquement NULL sur une action.
+model EtfMetadata {
+  id      String @id @default(uuid()) @db.Uuid
+  assetId String @unique @map("asset_id") @db.Uuid
+
+  expenseRatio          Decimal?  @map("expense_ratio") @db.Decimal(9, 6)
+  dividendYield         Decimal?  @map("dividend_yield") @db.Decimal(9, 6)
+  fundFamily            String?   @map("fund_family") @db.VarChar(100)
+  category              String?   @db.VarChar(100)
+  region                String?   @db.VarChar(100)
+  sector                String?   @db.VarChar(100)
+  assetClass            String?   @map("asset_class") @db.VarChar(50)
+  riskLevel             String?   @map("risk_level") @db.VarChar(50)
+  /// ACC (capitalisant) / DIST (distribuant) — anciennement la colonne "type".
+  distributionPolicy    String?   @map("distribution_policy") @db.VarChar(10)
+  distributionFrequency String?   @map("distribution_frequency") @db.VarChar(20)
+  inceptionDate         DateTime? @map("inception_date") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_etf_metadata_asset")
+
+  @@map("etf_metadata")
+  @@schema("market_data")
+}
+
+/// OHLCV horodaté, avec granularité et source explicites.
+model MarketPrice {
+  id      String @id @default(uuid()) @db.Uuid
+  assetId String @map("asset_id") @db.Uuid
+
+  interval  PriceInterval
+  timestamp DateTime      @db.Timestamptz(6)
+
+  open   Decimal? @db.Decimal(24, 8)
+  high   Decimal? @db.Decimal(24, 8)
+  low    Decimal? @db.Decimal(24, 8)
+  close  Decimal  @db.Decimal(24, 8)
+  volume BigInt?
+
+  source MarketDataSource @default(YAHOO)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_market_prices_asset")
+
+  @@unique([assetId, interval, timestamp], map: "uq_market_prices_asset_interval_ts")
+  @@index([assetId, interval, timestamp(sort: Desc)], map: "idx_market_prices_lookup")
+  @@map("market_prices")
+  @@schema("market_data")
+}
+
+/// Taux historisés. Le taux appliqué à un ordre doit rester auditable : il ne
+/// peut pas être re-récupéré a posteriori auprès du fournisseur.
+model FxRate {
+  id String @id @default(uuid()) @db.Uuid
+
+  base  Currency
+  quote Currency
+  rate  Decimal  @db.Decimal(24, 12)
+
+  source    String   @default("exchangerate-api") @db.VarChar(64)
+  fetchedAt DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  orders Order[]
+
+  @@index([base, quote, fetchedAt(sort: Desc)], map: "idx_fx_rates_pair_fetched")
+  @@map("fx_rates")
+  @@schema("market_data")
+}
+
+enum AssetType {
+  STOCK
+  ETF
 
   @@schema("market_data")
 }
 
-enum transaction_type {
-  buy
-  sell
-  deposit
-  withdraw
+enum AssetStatus {
+  ACTIVE
+  INACTIVE
+  DELISTED
 
-  @@schema("billing")
+  @@schema("market_data")
+}
+
+enum MarketDataSource {
+  YAHOO
+  ALPACA
+  MANUAL
+
+  @@schema("market_data")
+}
+
+enum PriceInterval {
+  MIN_1
+  MIN_5
+  HOUR_1
+  DAY_1
+
+  @@schema("market_data")
 }

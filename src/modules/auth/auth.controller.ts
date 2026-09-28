@@ -18,14 +18,14 @@ export class AuthControllers {
             secure: isProduction,
             sameSite:isProduction?"none":"lax"
         }
-        console.log("############ Token envoyé #################");
+        // Le token n'est plus trace : c'est une credentielle de session.
         res.cookie(name, value, { ...defaultOptions, ...options })
     }
 
     async loginController(req: Request, res: Response) {
         try {
             const { email, password } = req.body
-            console.log("login id", email, password);
+            // Le couple email/mot de passe etait journalise en clair a chaque tentative.
 
             if (!email || !password) throw new AppError("Missing required fields email and password", 400)
             const result = await this.authService.login({ email, password })
@@ -56,8 +56,6 @@ export class AuthControllers {
 
     async verifyCurrentUser(req: Request, res: Response) {
         try {
-            console.log("req.user", req.user);
-
             const user = await this.authService.getCurrentUser(req.user)
 
             res.status(200).json({

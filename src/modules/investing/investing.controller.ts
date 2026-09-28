@@ -11,7 +11,7 @@ export class InvestingController {
         this.Invest = this.Invest.bind(this)
     }
 
-    public Invest = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    public Invest = async (req: Request, res: Response, next: NextFunction): Promise<unknown> => {
         try {
             const { amount_to_invest, etf_id } = req.body
             const { user_id } = req.user ?? {}
@@ -29,14 +29,14 @@ export class InvestingController {
 
         } catch (error: any) {
             if (error instanceof AppError) {
-                res.status(error.statusCode).json({
+                return res.status(error.statusCode).json({
                     success: false,
                     message: error.message
                 });
             }
 
             console.log(error)
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: error?.message || "Erreur interne serveur"
             });
@@ -59,14 +59,14 @@ export class InvestingController {
             });
         } catch (error: any) {
             if (error instanceof AppError) {
-                res.status(error.statusCode).json({
+                return res.status(error.statusCode).json({
                     success: false,
                     message: error.message
                 });
             }
 
             console.log(error)
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: error?.message || "Erreur interne serveur"
             });

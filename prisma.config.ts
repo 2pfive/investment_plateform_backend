@@ -8,8 +8,7 @@ dotenv.config({
   path:`.env.${process.env.NODE_ENV || "development"}`
 })
 
-console.log(process.env["DATABASE_URL"]);
-
+// L'URL de connexion contient les identifiants Postgres : jamais journalisee.
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {

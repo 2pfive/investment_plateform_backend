@@ -1,62 +1,62 @@
-import jwt from "jsonwebtoken";
-import { readFileSync } from "fs";
 import { Request, Response, NextFunction } from "express";
 import { config } from "@/config/env.js";
+import { verifyToken } from "@/lib/jsonwebtoken.js";
 
-const publicKey = readFileSync(
-  "./src/config/session_user_key_public.pem",
-  "utf-8"
-);
-
+/**
+ * Garde d'authentification.
+ *
+ * Correctifs du 2026-08-31 :
+ *   * la vérification passe par `verifyToken`, qui verrouille `algorithms`
+ *     sur RS256 — sans quoi la confusion d'algorithme RS256 → HS256 était
+ *     exploitable, la clé publique étant versionnée dans git ;
+ *   * le token complet n'est plus journalisé : c'était une crédentielle de
+ *     session écrite en clair dans les logs, à chaque requête ;
+ *   * la clé publique est chargée une fois au démarrage (`config/keys.ts`),
+ *     plus à chaque import via un `readFileSync` au chemin relatif.
+ */
 export const requireAuth = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
+  let token: string | undefined = req.cookies?.[`${config.cookie_jwt_name}`];
 
-  let token: string | undefined;
-
-  // 1. Cookie
-  token = req.cookies?.[`${config.cookie_jwt_name}`];
-
-  // 2. Authorization header fallback
   if (!token) {
-
     const authHeader = req.headers.authorization;
-
     if (authHeader?.startsWith("Bearer ")) {
-      token = authHeader.split(" ")[1];
+      token = authHeader.slice(7).trim();
     }
   }
 
-  console.log("################### TOKEN #############");
-  console.log(token);
-
   if (!token) {
-    console.log(
-      "################### TOKEN INVALIDE OU MANQUANT #############"
-    );
-
     return res.status(401).json({
       success: false,
-      error: "Token manquant ou invalide"
+      error: {
+        code: "UNAUTHENTICATED",
+        message: "Authentification requise."
+      }
     });
   }
 
-  jwt.verify(token, publicKey, (err: any, decoded: any) => {
+  try {
+    const decoded = verifyToken(token);
 
-    if (err) {
-
-      console.log("JWT VERIFY ERROR", err);
-
-      return res.status(401).json({
-        success: false,
-        error: "Token invalide"
-      });
+    if (!decoded?.payload?.user_id) {
+      throw new Error("payload sans user_id");
     }
 
     req.user = decoded.payload;
+    return next();
+  } catch (err: any) {
+    // Le nom de l'erreur suffit au diagnostic ; le token n'est jamais tracé.
+    console.warn("Rejet JWT :", err?.name || "erreur de vérification");
 
-    next();
-  });
+    return res.status(401).json({
+      success: false,
+      error: {
+        code: "INVALID_TOKEN",
+        message: "Session invalide ou expirée."
+      }
+    });
+  }
 };

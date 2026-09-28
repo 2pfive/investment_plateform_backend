@@ -1,3 +1,4 @@
+import { AppError } from "@/utils/errorHandler.js";
 import { prisma } from "lib/prisma.js";
 import { CreateUserDTO } from "types/dto/user.dto.js";
 import { hashPassword, getXafToUsdRate } from "utils/utils.js";
@@ -18,7 +19,7 @@ export class UserService {
         });
 
         if (existingUser) {
-            throw new Error("Email already exists");
+            throw new AppError("Ce compte existe déjà",400)
         }
 
         // Hash password
@@ -44,7 +45,7 @@ export class UserService {
             const account = await tx.accounts.create({
                 data: {
                     user_id: newUser.user_id!,
-                    balance: 0
+                    balance: 20000
                 }
             });
 

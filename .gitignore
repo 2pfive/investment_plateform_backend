@@ -7,3 +7,10 @@ node_modules
 .env.production
 
 /src/generated/prisma
+
+# --- Secrets (ajouté le 2026-08-31, étape 0 sécurité) ---
+# Ne JAMAIS versionner de clé de signature.
+secrets/
+*.pem
+
+backups/

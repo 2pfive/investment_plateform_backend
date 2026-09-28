@@ -22,14 +22,14 @@ export default class MarketControllers {
             })
         } catch (error: any) {
             if (error instanceof AppError) {
-                res.status(error.statusCode).json({
+                return res.status(error.statusCode).json({
                     success: false,
                     message: error.message
                 });
             }
 
             console.log(error)
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: error?.message || "Erreur interne serveur"
             })
@@ -46,14 +46,14 @@ export default class MarketControllers {
             })
         } catch (error: any) {
             if (error instanceof AppError) {
-                res.status(error.statusCode).json({
+                return res.status(error.statusCode).json({
                     success: false,
                     message: error.message
                 });
             }
 
             console.log(error)
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: error?.message || "Erreur interne serveur"
             })
@@ -84,7 +84,7 @@ export default class MarketControllers {
             }
 
             console.log(error)
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: error?.message || "Erreur interne serveur"
             })
@@ -113,7 +113,7 @@ export default class MarketControllers {
                 });
             }
     
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: error?.message || "Erreur interne serveur"
             })
