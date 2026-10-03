@@ -79,7 +79,7 @@ scripts/           SQL bruts (auth.user, billing, investing, market_data.etf) + 
 
 ## Configuration / environnement
 
-- `.env.development` : `SERVER_PORT`, `DATABASE_URL`, `ORIGINS` (CORS), `SALT_ROUNDS`, `PASSPHRASE`, `COOKIE_JWT_NAME`, `EXCHANGE_RATE_URL`, `EXCHANGE_RATE_API_KEY`, `ACCESS_TOKEN` (test WhatsApp), etc.
+- `.env.development` : `SERVER_PORT`, `DATABASE_URL`, `ORIGINS` (CORS), `SALT_ROUNDS`, `COOKIE_JWT_NAME`, `JWT_PRIVATE_KEY_PATH`/`JWT_PUBLIC_KEY_PATH`/`JWT_PRIVATE_KEY_PASSPHRASE`, `EXCHANGE_RATE_URL`, `EXCHANGE_RATE_API_KEY`, ainsi que les variables `ALPACA_OAUTH_*`, `BROKER_*`, `MOBILE_RETURN_URL_ALLOWLIST` et `ORDER_*`/`FX_*` (voir `docs/ALPACA_OAUTH.md` et `docs/ORDERS.md`). Modèle sans secrets : `.env.example`.
 - `.env.production` : présent mais vide — à compléter avant tout déploiement en production.
 - `src/config/env.ts` : chargeur de configuration centralisé (CORS, port, sel bcrypt, nom du cookie, URL du taux de change).
 

@@ -61,15 +61,29 @@ const keyId = z.string().regex(/^[A-Za-z0-9_-]{1,32}$/, {
 });
 
 const schema = z.object({
-  ALPACA_OAUTH_CLIENT_ID: z.string().min(1),
-  ALPACA_OAUTH_CLIENT_SECRET: z.string().min(1),
+  /*
+   * OAuth facultatif : sans ces trois valeurs, seules les routes
+   * d'autorisation répondent `BROKER_NOT_CONFIGURED`. Un compte relié par
+   * clés (`npm run broker:link-keys`) fonctionne sans elles.
+   */
+  ALPACA_OAUTH_CLIENT_ID: z.string().default(""),
+  ALPACA_OAUTH_CLIENT_SECRET: z.string().default(""),
 
   /**
    * Adresse de rappel, déclarée à l'identique dans l'application Alpaca
    * Connect. Pointe vers CE backend (`…/api/v1/broker/alpaca/callback`),
    * jamais vers l'application mobile.
    */
-  ALPACA_OAUTH_REDIRECT_URI: secureUrl,
+  ALPACA_OAUTH_REDIRECT_URI: z.literal("").or(secureUrl).default(""),
+
+  /*
+   * Compte Alpaca PARTAGÉ (Trading API, clés du compte). Renseignées, elles
+   * priment sur OAuth : tous les utilisateurs AMARA passent leurs ordres sur
+   * ce seul compte. ALPACA_KEY_ENVIRONMENT = environnement des clés.
+   */
+  ALPACA_KEY: z.string().default(""),
+  ALPACA_SECRET: z.string().default(""),
+  ALPACA_KEY_ENVIRONMENT: z.literal("").or(z.enum(ENVIRONMENTS)).default(""),
 
   /**
    * Périmètres demandés, séparés par des espaces. `trading` seul : la lecture
@@ -91,6 +105,8 @@ const schema = z.object({
   ),
   ALPACA_API_URL_PAPER: secureUrl.default("https://paper-api.alpaca.markets"),
   ALPACA_API_URL_LIVE: secureUrl.default("https://api.alpaca.markets"),
+  /** API de données de marché : la même pour paper et live. */
+  ALPACA_DATA_URL: secureUrl.default("https://data.alpaca.markets"),
 
   /** Environnement utilisé quand la requête n'en précise pas. */
   BROKER_DEFAULT_ENVIRONMENT: z.enum(ENVIRONMENTS).default("PAPER"),
@@ -133,6 +149,14 @@ const schema = z.object({
 });
 
 export interface BrokerConfig {
+  /** Les trois valeurs OAuth sont-elles renseignées ? */
+  oauthConfigured: boolean;
+  /** Compte partagé, ou `null` en mode OAuth (un compte par utilisateur). */
+  sharedAccount: {
+    environment: BrokerEnvironmentName;
+    keyId: string;
+    secret: string;
+  } | null;
   clientId: string;
   clientSecret: string;
   redirectUri: string;
@@ -140,6 +164,7 @@ export interface BrokerConfig {
   authorizeUrl: string;
   tokenUrl: string;
   apiUrl: Record<BrokerEnvironmentName, string>;
+  dataUrl: string;
   defaultEnvironment: BrokerEnvironmentName;
   allowedEnvironments: BrokerEnvironmentName[];
   tokenKeys: {
@@ -210,9 +235,34 @@ function load(): BrokerConfigResult {
     };
   }
 
+  const hasKeys = Boolean(env.ALPACA_KEY && env.ALPACA_SECRET);
+  const keyEnvironment = env.ALPACA_KEY_ENVIRONMENT;
+
+  if (hasKeys && !keyEnvironment) {
+    return {
+      ok: false,
+      problems: ["ALPACA_KEY_ENVIRONMENT : PAPER ou LIVE, celui des clés"]
+    };
+  }
+  if (hasKeys && keyEnvironment && !env.BROKER_ALLOWED_ENVIRONMENTS.includes(keyEnvironment)) {
+    return {
+      ok: false,
+      problems: ["ALPACA_KEY_ENVIRONMENT : doit figurer dans BROKER_ALLOWED_ENVIRONMENTS"]
+    };
+  }
+
   return {
     ok: true,
     config: {
+      sharedAccount:
+        hasKeys && keyEnvironment
+          ? { environment: keyEnvironment, keyId: env.ALPACA_KEY, secret: env.ALPACA_SECRET }
+          : null,
+      oauthConfigured: Boolean(
+        env.ALPACA_OAUTH_CLIENT_ID &&
+          env.ALPACA_OAUTH_CLIENT_SECRET &&
+          env.ALPACA_OAUTH_REDIRECT_URI
+      ),
       clientId: env.ALPACA_OAUTH_CLIENT_ID,
       clientSecret: env.ALPACA_OAUTH_CLIENT_SECRET,
       redirectUri: env.ALPACA_OAUTH_REDIRECT_URI,
@@ -223,6 +273,7 @@ function load(): BrokerConfigResult {
         PAPER: env.ALPACA_API_URL_PAPER.replace(/\/+$/, ""),
         LIVE: env.ALPACA_API_URL_LIVE.replace(/\/+$/, "")
       },
+      dataUrl: env.ALPACA_DATA_URL.replace(/\/+$/, ""),
       defaultEnvironment: env.BROKER_DEFAULT_ENVIRONMENT,
       allowedEnvironments: env.BROKER_ALLOWED_ENVIRONMENTS,
       tokenKeys: { activeId: env.BROKER_TOKEN_KEY_ID, byId },

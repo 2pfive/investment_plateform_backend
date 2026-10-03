@@ -6,6 +6,7 @@ import AuthRouter from "../modules/auth/auth.router.js"
 import MarketRouter from "../modules/market/market.router.js"
 import BrokerRouter from "../modules/broker/broker.router.js"
 import OrderRouter from "../modules/orders/order.router.js"
+import LiveRouter from "../modules/live/live.router.js"
 
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma.js";
@@ -22,6 +23,7 @@ router.use('/market',MarketRouter)
 // Authentification route par route : le rappel OAuth est public.
 router.use('/broker',BrokerRouter)
 router.use('/orders',requireAuth,OrderRouter)
+router.use('/live',requireAuth,LiveRouter)
 
 
 router.get('/etf', async (req: Request, res: Response) => {

@@ -47,6 +47,11 @@ const env: Record<string, string> = {
   EXCHANGE_RATE_URL: `${FAKE}/fx/`,
   EXCHANGE_RATE_API_KEY: "test-fx-key",
   ORDER_FEE_RATE: "0",
+  // Indépendant du plafond et du compte partagé de .env.development.
+  ORDER_MAX_NOTIONAL_USD: "",
+  ALPACA_KEY: "",
+  ALPACA_SECRET: "",
+  ALPACA_KEY_ENVIRONMENT: "",
   ORDER_SYNC_ENABLED: "true",
   ORDER_SYNC_INTERVAL_SECONDS: "2"
 };

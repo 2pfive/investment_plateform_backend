@@ -1,4 +1,70 @@
-# Connexion des comptes Alpaca (OAuth) — mise en service
+# Connexion des comptes Alpaca — mise en service
+
+Le backend connaît deux modes. **Le mode actif aujourd'hui est le compte
+partagé.**
+
+| Mode | Activé par | Comptes Alpaca |
+| --- | --- | --- |
+| **Compte partagé** | `ALPACA_KEY` + `ALPACA_SECRET` + `ALPACA_KEY_ENVIRONMENT` renseignées | **Un seul**, celui des clés, pour tous les utilisateurs AMARA |
+| OAuth | `ALPACA_KEY` vide, `ALPACA_OAUTH_*` renseignées | Un par utilisateur, relié par lui-même |
+
+## Deux sortes d'identifiants Alpaca, à ne pas confondre
+
+| Identifiants | Où les obtenir | Servent à |
+| --- | --- | --- |
+| **Clés API** (`AK…` en live, `PK…` en paper) + secret | Tableau de bord Alpaca → API Keys | Agir sur **ce** compte : mode compte partagé |
+| **`client_id` + `client_secret`** | Alpaca Connect → « My Developed Apps » | Demander à d'autres titulaires l'accès à **leur** compte : mode OAuth |
+
+Les unes ne remplacent pas les autres. Des clés API ne permettent pas de faire
+de l'OAuth, et un `client_id` ne donne accès à aucun compte à lui seul.
+
+## Mode compte partagé (Trading API, clés du compte)
+
+```dotenv
+ALPACA_KEY=AK…
+ALPACA_SECRET=…
+ALPACA_KEY_ENVIRONMENT=LIVE        # celui des clés : LIVE (AK…) ou PAPER (PK…)
+BROKER_DEFAULT_ENVIRONMENT=LIVE
+BROKER_ALLOWED_ENVIRONMENTS=LIVE
+BROKER_TOKEN_KEY_ID=…              # toujours requis (configuration commune)
+BROKER_TOKEN_KEY=…
+ORDER_MAX_NOTIONAL_USD=20          # garde-fou en argent réel
+```
+
+Côté mobile : `EXPO_PUBLIC_BROKER_ENVIRONMENT=LIVE`.
+
+Rien d'autre : pas d'application Alpaca Connect, pas d'adresse de rappel, pas
+d'étape de liaison. Tout utilisateur AMARA connecté trade sur ce compte.
+
+Fonctionnement :
+
+- `GET /broker/connection` relit le compte chez Alpaca (`GET /v2/account`) :
+  `CONNECTED` avec le numéro masqué, ou `ERROR` si les clés sont refusées.
+  Un environnement autre que celui des clés répond `NOT_CONNECTED`.
+- `withBroker` crée à la volée, pour chaque utilisateur, une ligne
+  `broker_connections` **sans jeton** : les ordres s'y rattachent, et c'est par
+  elle que la liste et le worker de suivi retrouvent leur environnement.
+- Les clés partent en en-têtes `APCA-API-KEY-ID` / `APCA-API-SECRET-KEY`,
+  jamais en base.
+- Chaque ordre reste attribué à son utilisateur AMARA. Chez Alpaca, en
+  revanche, il n'existe qu'un portefeuille global : la répartition entre
+  utilisateurs n'existe que dans la base AMARA.
+- `POST /broker/alpaca/authorize` répond `503 BROKER_NOT_CONFIGURED` tant
+  qu'OAuth n'est pas configuré. `DELETE /broker/connection` n'a pas d'effet
+  durable : la ligne repasse `CONNECTED` au prochain ordre.
+
+**Limite.** Adapté à un test sur son propre argent. Un compte unique pour
+l'argent de plusieurs personnes est une structure omnibus : ni Alpaca ni AMARA
+ne cloisonnent les fonds, et cela relève d'obligations réglementaires.
+
+Vérification sans ordre, après configuration : démarrer le backend et appeler
+`GET /api/v1/broker/connection` avec une session. `npm run verify:broker` et
+`verify:orders` testent le mode OAuth contre un faux Alpaca ; ils ignorent les
+clés du `.env`.
+
+---
+
+# Mode OAuth
 
 Chaque utilisateur relie **son propre** compte Alpaca à son compte AMARA.
 AMARA ne détient ni titres ni espèces ; le backend conserve seulement un jeton
@@ -72,6 +138,9 @@ local par un tunnel (Cloudflare Tunnel, ngrok…) et déclarer l'adresse du
 tunnel.
 
 ### 3. Renseigner `.env.development`
+
+Vider d'abord `ALPACA_KEY` : renseignée, elle active le compte partagé, qui
+prime sur OAuth.
 
 ```dotenv
 ALPACA_OAUTH_CLIENT_ID=…

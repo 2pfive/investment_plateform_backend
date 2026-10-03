@@ -46,7 +46,11 @@ const brokerEnv: Record<string, string> = {
   BROKER_TOKEN_KEY: crypto.randomBytes(32).toString("base64"),
   BROKER_DEFAULT_ENVIRONMENT: "PAPER",
   BROKER_ALLOWED_ENVIRONMENTS: "PAPER,LIVE",
-  MOBILE_RETURN_URL_ALLOWLIST: "amara:,http://localhost:8081"
+  MOBILE_RETURN_URL_ALLOWLIST: "amara:,http://localhost:8081",
+  // Teste le mode OAuth : jamais le compte partagé de .env.development.
+  ALPACA_KEY: "",
+  ALPACA_SECRET: "",
+  ALPACA_KEY_ENVIRONMENT: ""
 };
 Object.assign(process.env, brokerEnv);
 

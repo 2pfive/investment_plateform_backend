@@ -47,6 +47,51 @@ export interface BrokerAccount {
   currency: string;
   cash: string;
   buyingPower: string;
+  /** Valeur totale du compte (espèces + titres), et à la clôture précédente. */
+  equity: string;
+  lastEquity: string;
+}
+
+/** Position détenue sur le compte, valorisée par le courtier. USD. */
+export interface BrokerPosition {
+  symbol: string;
+  quantity: string;
+  averageEntryPrice: string;
+  currentPrice: string;
+  marketValue: string;
+  costBasis: string;
+  unrealizedPl: string;
+  /** Pourcentage, ex. "4.12". */
+  unrealizedPlPercent: string;
+  changeTodayPercent: string;
+}
+
+/** Périodes des graphiques, dans le vocabulaire de l'application. */
+export type HistoryRange = "1J" | "1S" | "1M" | "3M" | "1A" | "TOUT";
+
+/** Point d'une série : horodatage ISO et valeur décimale. */
+export interface SeriesPoint {
+  at: string;
+  value: string;
+}
+
+/** Dernier cours connu d'un symbole et sa variation sur la séance. USD. */
+export interface MarketSnapshot {
+  symbol: string;
+  price: string | null;
+  previousClose: string | null;
+  /** Pourcentage, ex. "-0.94". `null` sans clôture précédente. */
+  changePercent: string | null;
+  at: string | null;
+}
+
+export interface NewsArticle {
+  id: string;
+  headline: string;
+  source: string;
+  url: string | null;
+  publishedAt: string;
+  symbols: string[];
 }
 
 /** Actif négociable chez le courtier. */
@@ -185,4 +230,19 @@ export interface BrokerProvider {
     context: BrokerContext,
     clientOrderId: string
   ): Promise<BrokerOrder | null>;
+
+  /* --- Lecture du compte et données de marché --- */
+
+  getPositions(context: BrokerContext): Promise<BrokerPosition[]>;
+
+  /** Valeur du compte au fil de la période. */
+  getPortfolioHistory(context: BrokerContext, range: HistoryRange): Promise<SeriesPoint[]>;
+
+  /** Symboles inconnus du fournisseur : absents du résultat. */
+  getSnapshots(context: BrokerContext, symbols: string[]): Promise<MarketSnapshot[]>;
+
+  /** Clôtures sur la période, séance régulière seulement pour « 1J ». */
+  getBars(context: BrokerContext, symbol: string, range: HistoryRange): Promise<SeriesPoint[]>;
+
+  getNews(context: BrokerContext, symbols: string[], limit: number): Promise<NewsArticle[]>;
 }

@@ -172,9 +172,23 @@ peut pas être re-récupéré après coup auprès du fournisseur.
 
 ## 5. Appliquer la migration
 
-La base n'avait **jamais été migrée par Prisma** : elle a été construite par les
-scripts SQL de `scripts/` puis introspectée. Il faut donc la « baseliner » avant
+La base a été construite par les scripts SQL de `scripts/` puis introspectée.
+`prisma/migrations/` commence donc à `0_init`, qu'il faut « baseliner » avant
 d'appliquer quoi que ce soit.
+
+**Attention.** Une base peut porter dans `_prisma_migrations` une ancienne
+migration `20260302113250_initial_migration_db`, absente du dépôt.
+`prisma migrate status` la signale ; elle est sans effet sur la procédure
+ci-dessous, appliquée telle quelle le 3 octobre 2026 sur la base locale :
+contrôles bloquants à 0, trois migrations passées, backfill de 6 actifs.
+
+Avant tout, une sauvegarde :
+
+```bash
+pg_dump -h localhost -U postgres -F c -f backups/avant-migrations.dump investment_plateform
+```
+
+Restauration : `pg_restore -c -d investment_plateform backups/avant-migrations.dump`.
 
 ### Étape 1 — diagnostic (lecture seule)
 

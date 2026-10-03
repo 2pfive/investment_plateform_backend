@@ -14,6 +14,7 @@ import {
 } from "@/lib/crypto/token-cipher.js";
 import {
   createBrokerAdapters,
+  sharedAccountCredential,
   type BrokerAdapters
 } from "@/infrastructure/brokers/broker.factory.js";
 import type { BrokerContext } from "@/ports/broker.port.js";
@@ -155,6 +156,22 @@ export class BrokerConnectionService {
     return result.config;
   }
 
+  /** Configuration complète, OAuth compris : pour les routes d'autorisation. */
+  private requireOAuthConfig(): BrokerConfig {
+    const config = this.requireConfig();
+
+    if (!config.oauthConfigured) {
+      console.error("[broker] OAuth non configuré : ALPACA_OAUTH_* manquants");
+      throw new BrokerError(
+        "BROKER_NOT_CONFIGURED",
+        "La connexion au courtier n’est pas disponible pour le moment.",
+        503
+      );
+    }
+
+    return config;
+  }
+
   private resolveEnvironment(
     config: BrokerConfig,
     requested?: string
@@ -203,7 +220,7 @@ export class BrokerConnectionService {
     expiresAt: string;
     environment: BrokerEnvironmentName;
   }> {
-    const config = this.requireConfig();
+    const config = this.requireOAuthConfig();
     const environment = this.resolveEnvironment(config, input.environment);
 
     if (!isAllowedReturnUrl(input.returnUrl, config.returnUrlAllowlist)) {
@@ -307,7 +324,7 @@ export class BrokerConnectionService {
 
     let config: BrokerConfig;
     try {
-      config = this.requireConfig();
+      config = this.requireOAuthConfig();
     } catch {
       return { kind: "redirect", location: withResult(returnUrl, "error") };
     }
@@ -454,6 +471,10 @@ export class BrokerConnectionService {
     const config = this.requireConfig();
     const environment = this.resolveEnvironment(config, requestedEnvironment);
 
+    if (config.sharedAccount) {
+      return this.sharedConnectionStatus(config, environment);
+    }
+
     const connection = await this.prisma.brokerConnection.findUnique({
       where: {
         userId_provider_environment: { userId, provider: PROVIDER, environment }
@@ -481,6 +502,45 @@ export class BrokerConnectionService {
           : null,
       scopes: connection?.scope ? connection.scope.split(/\s+/).filter(Boolean) : []
     };
+  }
+
+  /**
+   * État du compte partagé : relu chez Alpaca, ce qui vérifie les clés au
+   * passage. Le même pour tous les utilisateurs.
+   */
+  private async sharedConnectionStatus(
+    config: BrokerConfig,
+    environment: BrokerEnvironmentName
+  ): Promise<BrokerConnectionDto> {
+    const shared = config.sharedAccount!;
+    const base = {
+      broker: "ALPACA" as const,
+      environment,
+      paper: environment === "PAPER",
+      scopes: ["trading"]
+    };
+
+    if (environment !== shared.environment) {
+      return { ...base, status: "NOT_CONNECTED", accountNumber: null, connectedAt: null };
+    }
+
+    try {
+      const account = await this.adaptersFor(config).provider.getAccount({
+        environment,
+        accessToken: sharedAccountCredential(shared)
+      });
+      return {
+        ...base,
+        status: "CONNECTED",
+        accountNumber: maskAccountNumber(account.accountNumber.slice(-4)),
+        connectedAt: null
+      };
+    } catch (error) {
+      if (!(error instanceof BrokerError)) throw error;
+      // Clés refusées : ERROR. Alpaca injoignable : on ne sait pas, on le dit.
+      if (error.code !== "BROKER_UNAUTHORIZED") throw error;
+      return { ...base, status: "ERROR", accountNumber: null, connectedAt: null };
+    }
   }
 
   /**
@@ -532,6 +592,45 @@ export class BrokerConnectionService {
   ): Promise<T> {
     const config = this.requireConfig();
     const environment = this.resolveEnvironment(config, requestedEnvironment);
+
+    if (config.sharedAccount) {
+      const shared = config.sharedAccount;
+      if (environment !== shared.environment) {
+        throw new BrokerError(
+          "BROKER_NOT_CONNECTED",
+          environment === "LIVE"
+            ? "Le compte de courtage AMARA est en mode simulé."
+            : "Le compte de courtage AMARA est en argent réel : choisissez LIVE.",
+          409
+        );
+      }
+
+      /*
+       * Une ligne par utilisateur, sans jeton : les ordres s'y rattachent, et
+       * c'est par elle que la liste et le suivi retrouvent leur environnement.
+       */
+      const row = await this.prisma.brokerConnection.upsert({
+        where: {
+          userId_provider_environment: { userId, provider: PROVIDER, environment }
+        },
+        create: {
+          userId,
+          provider: PROVIDER,
+          environment,
+          status: "CONNECTED",
+          scope: "trading",
+          connectedAt: this.now()
+        },
+        update: { status: "CONNECTED", lastSyncedAt: this.now() },
+        select: { id: true }
+      });
+
+      return operation(
+        { environment, accessToken: sharedAccountCredential(shared) },
+        this.adaptersFor(config),
+        { id: row.id, environment }
+      );
+    }
 
     const connection = await this.prisma.brokerConnection.findUnique({
       where: {

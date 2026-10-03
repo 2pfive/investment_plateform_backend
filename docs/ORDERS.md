@@ -1,9 +1,15 @@
 # Ordres en argent réel
 
-Un utilisateur connecté à Alpaca (voir `ALPACA_OAUTH.md`) investit un montant
-dans sa devise. AMARA le convertit en dollars et transmet à Alpaca un **ordre
-au marché en montant** (`notional`, `market`, `day`) sur **son propre**
-compte.
+Un utilisateur investit un montant dans sa devise. AMARA le convertit en
+dollars et transmet à Alpaca un **ordre au marché en montant** (`notional`,
+`market`, `day`) :
+
+- en mode **compte partagé** (actif aujourd'hui), sur le compte Alpaca unique
+  défini par `ALPACA_KEY` ;
+- en mode **OAuth**, sur le compte que l'utilisateur a relié.
+
+Voir `ALPACA_OAUTH.md`. Les routes et garanties ci-dessous valent pour les
+deux modes.
 
 ## Routes (`/api/v1`, session obligatoire)
 

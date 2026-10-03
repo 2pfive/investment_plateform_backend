@@ -4,7 +4,17 @@ import type {
   BrokerProvider
 } from "@/ports/broker.port.js";
 import { AlpacaOAuth } from "./alpaca/alpaca.oauth.js";
-import { AlpacaTradingProvider } from "./alpaca/alpaca.trading.provider.js";
+import {
+  AlpacaTradingProvider,
+  apiKeyCredential
+} from "./alpaca/alpaca.trading.provider.js";
+
+/** Identifiant opaque du compte partagé, à placer dans `BrokerContext`. */
+export function sharedAccountCredential(
+  shared: NonNullable<BrokerConfig["sharedAccount"]>
+): string {
+  return apiKeyCredential(shared.keyId, shared.secret);
+}
 
 export interface BrokerAdapters {
   authorization: BrokerAuthorizationPort;
