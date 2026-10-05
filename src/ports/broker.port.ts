@@ -245,4 +245,14 @@ export interface BrokerProvider {
   getBars(context: BrokerContext, symbol: string, range: HistoryRange): Promise<SeriesPoint[]>;
 
   getNews(context: BrokerContext, symbols: string[], limit: number): Promise<NewsArticle[]>;
+
+  /** Univers des actions et ETF américains connus du courtier, actifs ou non. */
+  listAssets(context: BrokerContext): Promise<BrokerAsset[]>;
+
+  /**
+   * Montant échangé à la dernière séance close (cours × volume), par symbole.
+   * Sert uniquement à CLASSER les actifs par popularité : c'est pourquoi c'est
+   * un `number`, et non une chaîne décimale comme les montants d'un ordre.
+   */
+  getDollarVolumes(context: BrokerContext, symbols: string[]): Promise<Map<string, number>>;
 }

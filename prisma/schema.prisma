@@ -770,6 +770,42 @@ model MarketPrice {
   @@schema("market_data")
 }
 
+/// Fiche d'entreprise lue sur Wikidata / Wikipédia, gardée en cache.
+///
+/// Indexée par symbole et non rattachée à `Asset` : l'écran Marchés montre
+/// tout l'univers Alpaca, bien au-delà des actifs présents en base.
+///
+/// `descriptionFr` est la seule colonne saisie À LA MAIN (traduction ou
+/// réécriture) : un rafraîchissement depuis Wikidata ne la touche jamais.
+model CompanyProfile {
+  symbol String @id @db.VarChar(32)
+
+  /// `null` : cherché sur Wikidata, introuvable. On réessaie plus tard.
+  wikidataId   String?  @map("wikidata_id") @db.VarChar(32)
+  name         String?
+  logoUrl      String?  @map("logo_url")
+  industry     String?
+  employees    Int?
+  headquarters String?
+  /// « 1980-12-12 », « 1980-12 » ou « 1980 », selon la précision connue.
+  ipoDate      String?  @map("ipo_date") @db.VarChar(10)
+  website      String?
+  /// Titre de l'article, pour le lien « Source : Wikipédia ».
+  wikiTitleFr  String?  @map("wiki_title_fr")
+  /// Introductions des articles Wikipédia (CC BY-SA : citer la source).
+  summaryFr    String?  @map("summary_fr")
+  summaryEn    String?  @map("summary_en")
+  /// Description rédigée ou traduite par l'équipe. Prioritaire à l'affichage.
+  descriptionFr String? @map("description_fr")
+
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("company_profiles")
+  @@schema("market_data")
+}
+
 /// Taux historisés. Le taux appliqué à un ordre doit rester auditable : il ne
 /// peut pas être re-récupéré a posteriori auprès du fournisseur.
 model FxRate {

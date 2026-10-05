@@ -80,6 +80,13 @@ const alpacaSnapshots = z.record(
     .nullable()
 );
 
+const alpacaVolumes = z.record(
+  z.string(),
+  z
+    .object({ prevDailyBar: z.object({ c: z.number(), v: z.number() }).nullable().optional() })
+    .nullable()
+);
+
 const alpacaNews = z.object({
   news: z.array(
     z.object({
@@ -107,9 +114,14 @@ const DAY_MS = 86_400_000;
  * Données « SIP » (toutes les places américaines) : le forfait gratuit les
  * sert avec 15 minutes de retard, d'où `end` décalé. Le cours du moment vient
  * des instantanés, en flux IEX temps réel.
+ *
+ * `1J` fait exception : barres d'une minute en IEX, sans retard. Le SIP
+ * décalé ne donnait que 2 ou 3 barres de 5 min juste après l'ouverture, et une
+ * courbe qui s'arrêtait 16 min avant le cours affiché. IEX ne couvre qu'une
+ * part du volume, mais à la minute les valeurs liquides restent bien fournies.
  */
 const BAR_RANGES: Record<HistoryRange, { timeframe: string; days: number }> = {
-  "1J": { timeframe: "5Min", days: 5 },
+  "1J": { timeframe: "1Min", days: 5 },
   "1S": { timeframe: "1Hour", days: 7 },
   "1M": { timeframe: "1Day", days: 31 },
   "3M": { timeframe: "1Day", days: 92 },
@@ -138,14 +150,24 @@ function nyMinutes(iso: string): number {
   return h * 60 + m;
 }
 
-/** Ne garde que la dernière séance régulière (9 h 30 – 16 h, New York). */
+/**
+ * Ne garde qu'une séance régulière (9 h 30 – 16 h, New York) : la plus récente
+ * qui compte au moins 2 barres. Juste avant l'ouverture, un week-end ou un
+ * jour férié, on retombe ainsi sur la séance précédente plutôt que sur une
+ * courbe d'un seul point.
+ */
 function lastRegularSession(bars: { t: string; c: number }[]) {
   const regular = bars.filter((b) => {
     const minutes = nyMinutes(b.t);
     return minutes >= 570 && minutes < 960;
   });
-  const lastDay = regular.at(-1)?.t.slice(0, 10);
-  return regular.filter((b) => b.t.slice(0, 10) === lastDay);
+  const byDay = new Map<string, typeof regular>();
+  for (const b of regular) {
+    const day = b.t.slice(0, 10);
+    byDay.set(day, [...(byDay.get(day) ?? []), b]);
+  }
+  const sessions = [...byDay.values()];
+  return sessions.reverse().find((s) => s.length >= 2) ?? sessions.at(0) ?? [];
 }
 
 /**
@@ -335,6 +357,7 @@ export class AlpacaTradingProvider implements BrokerProvider {
 
   async getBars(context: BrokerContext, symbol: string, range: HistoryRange): Promise<SeriesPoint[]> {
     const { timeframe, days } = BAR_RANGES[range];
+    const live = range === "1J";
     const now = Date.now();
     const result = await this.readData(
       context,
@@ -344,8 +367,8 @@ export class AlpacaTradingProvider implements BrokerProvider {
       {
         timeframe,
         start: new Date(now - days * DAY_MS).toISOString(),
-        end: new Date(now - 16 * 60_000).toISOString(),
-        feed: "sip",
+        end: new Date(now - (live ? 0 : 16 * 60_000)).toISOString(),
+        feed: live ? "iex" : "sip",
         adjustment: "all",
         limit: "10000"
       }
@@ -367,6 +390,49 @@ export class AlpacaTradingProvider implements BrokerProvider {
       publishedAt: n.created_at,
       symbols: n.symbols
     }));
+  }
+
+  async listAssets(context: BrokerContext): Promise<BrokerAsset[]> {
+    // Validation ligne à ligne : une fiche malformée parmi ~12 000 ne doit
+    // pas faire tomber toute la liste.
+    const rows = await this.read(
+      context,
+      "/v2/assets",
+      "liste des actifs",
+      z.array(z.unknown()),
+      { status: "active", asset_class: "us_equity" }
+    );
+    return (rows ?? []).flatMap((row) => {
+      const parsed = alpacaAsset.safeParse(row);
+      return parsed.success ? [toBrokerAsset(parsed.data)] : [];
+    });
+  }
+
+  async getDollarVolumes(context: BrokerContext, symbols: string[]): Promise<Map<string, number>> {
+    const volumes = new Map<string, number>();
+    // 500 symboles par appel : l'URL reste sous ~4 Ko. Trois appels à la
+    // fois, pour ne pas entamer d'un coup la limite de 200 requêtes/min.
+    const chunks: string[][] = [];
+    for (let i = 0; i < symbols.length; i += 500) chunks.push(symbols.slice(i, i + 500));
+
+    const fetchChunk = async (chunk: string[]) => {
+      const snapshots = await this.readData(
+        context,
+        "/v2/stocks/snapshots",
+        "volumes échangés",
+        alpacaVolumes,
+        { symbols: chunk.join(","), feed: "iex" }
+      );
+      for (const [symbol, snap] of Object.entries(snapshots ?? {})) {
+        const day = snap?.prevDailyBar;
+        if (day) volumes.set(symbol, day.c * day.v);
+      }
+    };
+
+    for (let i = 0; i < chunks.length; i += 3) {
+      await Promise.all(chunks.slice(i, i + 3).map(fetchChunk));
+    }
+    return volumes;
   }
 
   async getAsset(context: BrokerContext, symbol: string): Promise<BrokerAsset | null> {
