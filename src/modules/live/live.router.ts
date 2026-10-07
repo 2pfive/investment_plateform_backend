@@ -7,6 +7,7 @@ import { BrokerConnectionService } from "@/modules/broker/broker.service.js";
 import { FxRateService } from "@/modules/fx/fx.service.js";
 import { MarketCatalog, classify, search } from "./market.catalog.js";
 import { CompanyProfileService } from "./company.profile.js";
+import { SecFundamentalsService } from "./sec.fundamentals.js";
 
 /**
  * ============================================================
@@ -26,6 +27,7 @@ import { CompanyProfileService } from "./company.profile.js";
  *   GET /live/market?type=ETF&q=gold&offset=0&limit=30
  *   GET /live/assets/:symbol
  *   GET /live/assets/:symbol/profile
+ *   GET /live/assets/:symbol/fundamentals
  *   GET /live/logos?symbols=AAPL,MSFT
  *
  * ponytail: aucun cache serveur, sauf l'univers de `/market` (voir
@@ -56,6 +58,16 @@ const broker = new BrokerConnectionService();
 const fx = new FxRateService();
 const market = new MarketCatalog();
 const profiles = new CompanyProfileService();
+const sec = new SecFundamentalsService();
+
+/** Taux de croissance annuel moyen entre deux valeurs positives, en %. */
+function yearlyGrowth(first: number | null, last: number | null, years: number): number | null {
+  if (!first || !last || first <= 0 || last <= 0 || years <= 0) return null;
+  return (Math.pow(last / first, 1 / years) - 1) * 100;
+}
+
+const round = (n: number | null, digits = 2) =>
+  n == null || !Number.isFinite(n) ? null : Number(n.toFixed(digits));
 
 type Handler = (
   input: z.infer<typeof query> & { symbol: string },
@@ -200,6 +212,91 @@ router.get(
       nextOffset: offset + limit < matches.length ? offset + limit : null,
       // « 3 résultats dans ETF » quand la recherche ne trouve rien ici.
       otherTotal: q ? search(listed, type === "ETF" ? "STOCK" : "ETF", q).length : 0
+    };
+  })
+);
+
+/**
+ * Chiffres, finances et croissance d'une société : comptes SEC + cours
+ * Alpaca. Valeurs en NOMBRES (dollars, pourcentages) : elles servent à
+ * l'affichage et ne participent à aucun ordre.
+ *
+ * Les ratios sont calculés sur des TOTAUX (valeur en Bourse ÷ bénéfice
+ * annuel), jamais par action : une division d'actions survenue après le
+ * dernier rapport fausserait sinon le calcul.
+ */
+router.get(
+  "/assets/:symbol/fundamentals",
+  live(async ({ symbol }, context, provider) => {
+    const [figures, [snapshot], year] = await Promise.all([
+      sec.figures(symbol),
+      provider.getSnapshots(context, [symbol]),
+      provider.getBars(context, symbol, "1A")
+    ]);
+
+    const price = snapshot?.price ? Number(snapshot.price) : null;
+    const closes = year.map((p) => Number(p.value)).filter(Number.isFinite);
+    // Symbole à catégorie (« BRK.B ») : les catégories d'une même société
+    // n'ont pas la même valeur (une action A de Berkshire vaut 1 500 B). Le
+    // nombre total d'actions × le cours d'une seule catégorie serait faux.
+    const shares = symbol.includes(".") ? null : (figures?.sharesOutstanding ?? null);
+    const marketCap = price && shares ? price * shares : null;
+    const latest = figures?.latest ?? null;
+    const netIncome = latest?.netIncome ?? null;
+
+    const annual = figures?.annual ?? [];
+    const withRevenue = annual.filter((a) => a.revenue != null);
+    const withIncome = annual.filter((a) => a.netIncome != null);
+    const span = (rows: typeof annual) => (rows.length > 1 ? rows.at(-1)!.year - rows[0].year : 0);
+
+    return {
+      symbol,
+      market: {
+        price,
+        marketCap: round(marketCap, 0),
+        // Société en perte : pas de rapport prix / bénéfices, il n'aurait
+        // aucun sens. `isProfitable` le dit à l'écran.
+        priceToEarnings: marketCap && netIncome && netIncome > 0 ? round(marketCap / netIncome, 1) : null,
+        isProfitable: netIncome == null ? null : netIncome > 0,
+        yearLow: closes.length ? Math.min(...closes) : null,
+        yearHigh: closes.length ? Math.max(...closes) : null,
+        dividends: figures?.dividends ?? null,
+        dividendYield:
+          marketCap && latest?.dividendsPaid != null
+            ? round((Math.abs(latest.dividendsPaid) / marketCap) * 100)
+            : null
+      },
+      finances: latest
+        ? {
+            fiscalYearEnd: latest.end,
+            revenue: latest.revenue,
+            netIncome,
+            netMargin:
+              latest.revenue && netIncome != null ? round((netIncome / latest.revenue) * 100, 1) : null,
+            freeCashFlow:
+              latest.operatingCashFlow != null && latest.capitalExpenditure != null
+                ? latest.operatingCashFlow - latest.capitalExpenditure
+                : null,
+            balanceDate: figures!.balance.end,
+            cash: figures!.balance.cash,
+            debt: figures!.balance.debt
+          }
+        : null,
+      growth: annual.length
+        ? {
+            years: annual.map((a) => ({ year: a.year, revenue: a.revenue, netIncome: a.netIncome })),
+            revenuePerYear: round(
+              yearlyGrowth(withRevenue[0]?.revenue ?? null, withRevenue.at(-1)?.revenue ?? null, span(withRevenue)),
+              1
+            ),
+            netIncomePerYear: round(
+              yearlyGrowth(withIncome[0]?.netIncome ?? null, withIncome.at(-1)?.netIncome ?? null, span(withIncome)),
+              1
+            ),
+            spanYears: span(withRevenue.length ? withRevenue : withIncome)
+          }
+        : null,
+      source: figures ? "SEC EDGAR" : null
     };
   })
 );

@@ -806,6 +806,24 @@ model CompanyProfile {
   @@schema("market_data")
 }
 
+/// Comptes résumés d'une société (SEC EDGAR), gardés en cache un jour.
+///
+/// `data` est le résumé calculé (`CompanyFigures`), pas le XBRL brut, qui
+/// pèse plusieurs mégaoctets. `null` : la SEC n'a rien pour ce symbole.
+model CompanyFundamentals {
+  symbol String @id @db.VarChar(32)
+
+  /// Identifiant de la société à la SEC.
+  cik       Int?
+  data      Json?
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("company_fundamentals")
+  @@schema("market_data")
+}
+
 /// Taux historisés. Le taux appliqué à un ordre doit rester auditable : il ne
 /// peut pas être re-récupéré a posteriori auprès du fournisseur.
 model FxRate {
