@@ -4,6 +4,7 @@ import { prisma as defaultPrisma } from "@/lib/prisma.js";
 import { ordersConfig } from "@/config/orders.config.js";
 import { BrokerConnectionService } from "@/modules/broker/broker.service.js";
 import { FxRateService, type FundingCurrency } from "@/modules/fx/fx.service.js";
+import { PushService } from "@/modules/notifications/push.service.js";
 import type {
   BrokerOrder,
   BrokerProvider,
@@ -94,6 +95,7 @@ interface Dependencies {
   prisma?: typeof defaultPrisma;
   broker?: BrokerConnectionService;
   fx?: FxRateService;
+  push?: PushService;
   now?: () => Date;
 }
 
@@ -105,6 +107,7 @@ export class OrderService {
   private readonly prisma: typeof defaultPrisma;
   private readonly broker: BrokerConnectionService;
   private readonly fx: FxRateService;
+  private readonly push: PushService;
   private readonly now: () => Date;
 
   constructor(deps: Dependencies = {}) {
@@ -112,6 +115,7 @@ export class OrderService {
     this.now = deps.now ?? (() => new Date());
     this.broker = deps.broker ?? new BrokerConnectionService({ prisma: this.prisma, now: this.now });
     this.fx = deps.fx ?? new FxRateService({ prisma: this.prisma, now: this.now });
+    this.push = deps.push ?? new PushService({ prisma: this.prisma });
   }
 
   /* ========================================================
@@ -756,6 +760,51 @@ export class OrderService {
       await this.prisma.orderEvent.create({
         data: { orderId, fromStatus: current.status, toStatus: to, source, brokerStatusRaw }
       });
+
+      // Une seule fois par ordre : seul le gagnant de l'écriture conditionnelle
+      // arrive ici. Sans attendre : l'envoi ne retarde pas la synchronisation.
+      if (to === "FILLED") void this.notifyFilled(orderId);
+    }
+  }
+
+  /** « Achat exécuté » sur les appareils de l'utilisateur. Ne lève jamais. */
+  private async notifyFilled(orderId: string): Promise<void> {
+    try {
+      const order = await this.prisma.order.findUniqueOrThrow({
+        where: { id: orderId },
+        select: {
+          userId: true,
+          side: true,
+          clientOrderId: true,
+          filledQuantity: true,
+          averageFilledPrice: true,
+          requestedAmount: true,
+          requestedCurrency: true,
+          asset: { select: { symbol: true } },
+          brokerConnection: { select: { environment: true } }
+        }
+      });
+
+      const symbol = order.asset.symbol;
+      const quantity = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 4 }).format(
+        Number(order.filledQuantity)
+      );
+      const price = order.averageFilledPrice
+        ? ` à ${new Intl.NumberFormat("fr-FR", { style: "currency", currency: "USD" }).format(Number(order.averageFilledPrice))}`
+        : "";
+      const amount = new Intl.NumberFormat("fr-FR", {
+        maximumFractionDigits: CURRENCY_DECIMALS[order.requestedCurrency]
+      }).format(Number(order.requestedAmount));
+      const currency = order.requestedCurrency === "XAF" ? "FCFA" : order.requestedCurrency;
+      const simulated = order.brokerConnection?.environment === "PAPER" ? " (simulation)" : "";
+
+      await this.push.sendToUser(order.userId, {
+        title: `${order.side === "BUY" ? "Achat" : "Vente"} exécuté : ${symbol}${simulated}`,
+        body: `${quantity} ${symbol}${price}, pour ${amount} ${currency}.`,
+        data: { type: "ORDER_FILLED", orderId, clientOrderId: order.clientOrderId }
+      });
+    } catch (error) {
+      console.warn("[orders] notification d’exécution impossible :", (error as Error)?.name);
     }
   }
 

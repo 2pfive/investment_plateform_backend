@@ -7,6 +7,8 @@ import MarketRouter from "../modules/market/market.router.js"
 import BrokerRouter from "../modules/broker/broker.router.js"
 import OrderRouter from "../modules/orders/order.router.js"
 import LiveRouter from "../modules/live/live.router.js"
+import NotificationRouter from "../modules/notifications/notification.router.js"
+import WatchlistRouter from "../modules/watchlist/watchlist.router.js"
 
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma.js";
@@ -24,6 +26,8 @@ router.use('/market',MarketRouter)
 router.use('/broker',BrokerRouter)
 router.use('/orders',requireAuth,OrderRouter)
 router.use('/live',requireAuth,LiveRouter)
+router.use('/notifications',requireAuth,NotificationRouter)
+router.use('/watchlist',requireAuth,WatchlistRouter)
 
 
 router.get('/etf', async (req: Request, res: Response) => {

@@ -55,7 +55,28 @@ model user {
   brokerConnections BrokerConnection[]
   oauthStates       OAuthState[]
   idempotencyKeys   IdempotencyKey[]
+  pushTokens        PushToken[]
+  watchlist         WatchlistItem[]
 
+  @@schema("auth")
+}
+
+/// Jeton Expo Push d'un appareil. Un appareil n'appartient qu'à un compte à la
+/// fois : se connecter sur un autre compte le réattribue.
+model PushToken {
+  id       String @id @default(uuid()) @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  /// `ExponentPushToken[…]`.
+  token    String @unique @db.VarChar(255)
+  platform String @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user user @relation(fields: [userId], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_push_tokens_user")
+
+  @@index([userId], map: "idx_push_tokens_user")
+  @@map("push_tokens")
   @@schema("auth")
 }
 
@@ -473,6 +494,22 @@ model IdempotencyKey {
   @@unique([userId, key], map: "uq_idempotency_keys_user_key")
   @@index([expiresAt], map: "idx_idempotency_keys_expires")
   @@map("idempotency_keys")
+  @@schema("investing")
+}
+
+/// Actifs suivis par un utilisateur. Indexés par symbole et non rattachés à
+/// `Asset` : l'écran Marchés montre tout l'univers Alpaca.
+model WatchlistItem {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  symbol String @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user user @relation(fields: [userId], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_watchlist_items_user")
+
+  @@unique([userId, symbol], map: "uq_watchlist_items_user_symbol")
+  @@map("watchlist_items")
   @@schema("investing")
 }
 
