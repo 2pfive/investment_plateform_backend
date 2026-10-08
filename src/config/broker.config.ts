@@ -85,6 +85,17 @@ const schema = z.object({
   ALPACA_SECRET: z.string().default(""),
   ALPACA_KEY_ENVIRONMENT: z.literal("").or(z.enum(ENVIRONMENTS)).default(""),
 
+  /*
+   * Clés dédiées à chaque environnement, pour basculer sans les recopier :
+   * `ALPACA_TRADING_MODE` choisit lesquelles servent. Vide, c'est
+   * `ALPACA_KEY_ENVIRONMENT` qui décide, comme avant.
+   */
+  ALPACA_PAPER_KEY: z.string().default(""),
+  ALPACA_PAPER_SECRET: z.string().default(""),
+  ALPACA_LIVE_KEY: z.string().default(""),
+  ALPACA_LIVE_SECRET: z.string().default(""),
+  ALPACA_TRADING_MODE: z.literal("").or(z.enum(ENVIRONMENTS)).default(""),
+
   /**
    * Périmètres demandés, séparés par des espaces. `trading` seul : la lecture
    * est accordée par défaut, `account:write` modifierait la configuration du
@@ -244,20 +255,44 @@ function load(): BrokerConfigResult {
       problems: ["ALPACA_KEY_ENVIRONMENT : PAPER ou LIVE, celui des clés"]
     };
   }
-  if (hasKeys && keyEnvironment && !env.BROKER_ALLOWED_ENVIRONMENTS.includes(keyEnvironment)) {
+
+  // Clés disponibles par environnement : les dédiées d'abord, puis ALPACA_KEY
+  // dans l'environnement qu'elle déclare.
+  const keys: Record<BrokerEnvironmentName, { keyId: string; secret: string } | null> = {
+    PAPER: env.ALPACA_PAPER_KEY && env.ALPACA_PAPER_SECRET
+      ? { keyId: env.ALPACA_PAPER_KEY, secret: env.ALPACA_PAPER_SECRET }
+      : null,
+    LIVE: env.ALPACA_LIVE_KEY && env.ALPACA_LIVE_SECRET
+      ? { keyId: env.ALPACA_LIVE_KEY, secret: env.ALPACA_LIVE_SECRET }
+      : null
+  };
+  if (hasKeys && keyEnvironment && !keys[keyEnvironment]) {
+    keys[keyEnvironment] = { keyId: env.ALPACA_KEY, secret: env.ALPACA_SECRET };
+  }
+
+  const mode = env.ALPACA_TRADING_MODE || (hasKeys ? keyEnvironment : "");
+
+  if (mode && !keys[mode]) {
     return {
       ok: false,
-      problems: ["ALPACA_KEY_ENVIRONMENT : doit figurer dans BROKER_ALLOWED_ENVIRONMENTS"]
+      problems: [
+        `ALPACA_TRADING_MODE=${mode} : renseigner ALPACA_${mode}_KEY et ALPACA_${mode}_SECRET`
+      ]
+    };
+  }
+  if (mode && !env.BROKER_ALLOWED_ENVIRONMENTS.includes(mode)) {
+    return {
+      ok: false,
+      problems: [
+        `${env.ALPACA_TRADING_MODE ? "ALPACA_TRADING_MODE" : "ALPACA_KEY_ENVIRONMENT"} : doit figurer dans BROKER_ALLOWED_ENVIRONMENTS`
+      ]
     };
   }
 
   return {
     ok: true,
     config: {
-      sharedAccount:
-        hasKeys && keyEnvironment
-          ? { environment: keyEnvironment, keyId: env.ALPACA_KEY, secret: env.ALPACA_SECRET }
-          : null,
+      sharedAccount: mode ? { environment: mode, ...keys[mode]! } : null,
       oauthConfigured: Boolean(
         env.ALPACA_OAUTH_CLIENT_ID &&
           env.ALPACA_OAUTH_CLIENT_SECRET &&

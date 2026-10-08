@@ -52,6 +52,9 @@ const env: Record<string, string> = {
   ALPACA_KEY: "",
   ALPACA_SECRET: "",
   ALPACA_KEY_ENVIRONMENT: "",
+  ALPACA_PAPER_KEY: "",
+  ALPACA_LIVE_KEY: "",
+  ALPACA_TRADING_MODE: "",
   ORDER_SYNC_ENABLED: "true",
   ORDER_SYNC_INTERVAL_SECONDS: "2"
 };

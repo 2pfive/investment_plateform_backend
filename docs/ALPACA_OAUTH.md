@@ -33,6 +33,23 @@ ORDER_MAX_NOTIONAL_USD=20          # garde-fou en argent réel
 
 Côté mobile : `EXPO_PUBLIC_BROKER_ENVIRONMENT=LIVE`.
 
+### Basculer paper ↔ live depuis le backend seul
+
+```dotenv
+ALPACA_PAPER_KEY=PK…
+ALPACA_PAPER_SECRET=…
+ALPACA_LIVE_KEY=AK…                # facultatif : à défaut, ALPACA_KEY si LIVE
+ALPACA_LIVE_SECRET=…
+ALPACA_TRADING_MODE=PAPER          # ou LIVE ; doit figurer dans BROKER_ALLOWED_ENVIRONMENTS
+```
+
+En mode compte partagé, le serveur impose son environnement : le paramètre
+`environment` envoyé par l'application est ignoré, et les réponses portent
+l'environnement réel (`paper: true` en simulation). Changer
+`ALPACA_TRADING_MODE` puis redémarrer suffit ; aucune nouvelle version de
+l'application n'est nécessaire. Les ordres et l'historique sont séparés par
+environnement : en PAPER, l'application ne montre que les ordres paper.
+
 Rien d'autre : pas d'application Alpaca Connect, pas d'adresse de rappel, pas
 d'étape de liaison. Tout utilisateur AMARA connecté trade sur ce compte.
 

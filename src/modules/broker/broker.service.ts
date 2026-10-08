@@ -176,6 +176,13 @@ export class BrokerConnectionService {
     config: BrokerConfig,
     requested?: string
   ): BrokerEnvironmentName {
+    /*
+     * Compte partagé : c'est le serveur qui choisit (ALPACA_TRADING_MODE).
+     * L'environnement demandé par l'application est ignoré, pour basculer
+     * paper ↔ live sans republier l'application.
+     */
+    if (config.sharedAccount) return config.sharedAccount.environment;
+
     const environment = (requested ?? config.defaultEnvironment).toUpperCase();
 
     if (environment !== "PAPER" && environment !== "LIVE") {
@@ -520,10 +527,6 @@ export class BrokerConnectionService {
       scopes: ["trading"]
     };
 
-    if (environment !== shared.environment) {
-      return { ...base, status: "NOT_CONNECTED", accountNumber: null, connectedAt: null };
-    }
-
     try {
       const account = await this.adaptersFor(config).provider.getAccount({
         environment,
@@ -595,15 +598,6 @@ export class BrokerConnectionService {
 
     if (config.sharedAccount) {
       const shared = config.sharedAccount;
-      if (environment !== shared.environment) {
-        throw new BrokerError(
-          "BROKER_NOT_CONNECTED",
-          environment === "LIVE"
-            ? "Le compte de courtage AMARA est en mode simulé."
-            : "Le compte de courtage AMARA est en argent réel : choisissez LIVE.",
-          409
-        );
-      }
 
       /*
        * Une ligne par utilisateur, sans jeton : les ordres s'y rattachent, et

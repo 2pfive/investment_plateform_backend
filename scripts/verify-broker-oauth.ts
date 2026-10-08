@@ -50,7 +50,10 @@ const brokerEnv: Record<string, string> = {
   // Teste le mode OAuth : jamais le compte partagé de .env.development.
   ALPACA_KEY: "",
   ALPACA_SECRET: "",
-  ALPACA_KEY_ENVIRONMENT: ""
+  ALPACA_KEY_ENVIRONMENT: "",
+  ALPACA_PAPER_KEY: "",
+  ALPACA_LIVE_KEY: "",
+  ALPACA_TRADING_MODE: ""
 };
 Object.assign(process.env, brokerEnv);
 
