@@ -40,6 +40,13 @@ const TICKERS_TTL_MS = 24 * 60 * 60_000;
 const YEARS = 6;
 
 /**
+ * Version du résumé stocké en cache. À incrémenter dès que `CompanyFigures`
+ * change : les fiches d'une version antérieure sont relues à la SEC au lieu
+ * d'attendre 24 h.
+ */
+const FIGURES_VERSION = 2;
+
+/**
  * Pas de bénéfice PAR ACTION : la SEC ne recalcule pas les années antérieures
  * à une division d'actions (Netflix passe de 9,95 $ à 1,20 $ en 2023, sans
  * que rien ne se soit effondré). Les totaux, eux, ne bougent pas.
@@ -51,6 +58,12 @@ export interface AnnualFigures {
   end: string;
   revenue: number | null;
   netIncome: number | null;
+  /** Argent encaissé par l'activité (flux de trésorerie d'exploitation). */
+  operatingCashFlow: number | null;
+  /** Investissements de l'exercice (usines, matériel…), en valeur positive. */
+  capitalExpenditure: number | null;
+  /** Exploitation − investissements. `null` si l'un des deux manque. */
+  freeCashFlow: number | null;
 }
 
 /** Dividende versé par action, en dollars. */
@@ -69,6 +82,7 @@ export interface DividendHistory {
 
 /** Résumé des comptes, en dollars. Ce qui est stocké en cache. */
 export interface CompanyFigures {
+  version: number;
   cik: number;
   /** Exercices annuels, du plus ancien au plus récent. */
   annual: AnnualFigures[];
@@ -79,13 +93,18 @@ export interface CompanyFigures {
     netIncome: number | null;
     operatingCashFlow: number | null;
     capitalExpenditure: number | null;
+    freeCashFlow: number | null;
     /** Total versé aux actionnaires sur l'exercice. */
     dividendsPaid: number | null;
   } | null;
   /** Bilan le plus récent (trimestriel ou annuel). */
   balance: {
     end: string | null;
+    /** Trésorerie + placements à court terme, à la même date. */
     cash: number | null;
+    /** Dont placements à court terme ; `null` si aucun n'est publié à cette date. */
+    shortTermInvestments: number | null;
+    /** Dette financière, hors contrats de location. */
     debt: number | null;
     equity: number | null;
   };
@@ -253,6 +272,45 @@ const REVENUE = [
 ];
 const NET_INCOME = ["NetIncomeLoss", "ProfitLoss"];
 
+const CASH = ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"];
+/**
+ * Placements à court terme : trois étiquettes pour la même ligne du bilan
+ * (Apple publie `MarketableSecuritiesCurrent`, d'autres `ShortTermInvestments`).
+ * Une société n'en utilise qu'une ; on en retient UNE seule valeur, jamais la
+ * somme, pour ne pas compter deux fois la même ligne.
+ */
+const SHORT_TERM_INVESTMENTS = [
+  "ShortTermInvestments",
+  "MarketableSecuritiesCurrent",
+  "AvailableForSaleSecuritiesDebtSecuritiesCurrent"
+];
+
+/**
+ * Argent disponible = trésorerie + placements à court terme. Les placements
+ * ne s'ajoutent que s'ils sont arrêtés à la même date que la trésorerie :
+ * additionner deux bilans différents n'aurait pas de sens.
+ */
+export function cashPosition(concepts: Concepts): {
+  end: string;
+  cash: number;
+  shortTermInvestments: number | null;
+} | null {
+  const cash = latestInstant(concepts, CASH);
+  if (!cash) return null;
+  const invested = latestInstant(concepts, SHORT_TERM_INVESTMENTS);
+  const sameDate = invested && invested.end === cash.end ? invested.val : null;
+  return { end: cash.end, cash: cash.val + (sameDate ?? 0), shortTermInvestments: sameDate };
+}
+
+/**
+ * Argent réellement dégagé : exploitation − investissements. Les sociétés
+ * publient les investissements en positif (un paiement) ; la valeur absolue
+ * protège d'un signe inattendu. Une donnée absente n'est jamais prise pour 0.
+ */
+export function freeCashFlow(operating: number | null, capex: number | null): number | null {
+  return operating != null && capex != null ? operating - Math.abs(capex) : null;
+}
+
 /**
  * Plusieurs noms pour un même chiffre : on prend, clôture par clôture, le
  * premier qui a une valeur. Un nom abandonné depuis des années (Apple et
@@ -285,18 +343,22 @@ export function summarize(cik: number, all: { dei?: Concepts; "us-gaap"?: Concep
   // Clôtures connues, du plus ancien au plus récent. Le résultat net est
   // le seul chiffre que toute société publie, d'où son rôle de référence.
   const ends = [...new Set([...netIncome.keys(), ...revenue.keys()])].sort();
-  const annual = ends.slice(-YEARS).map((end) => ({
-    year: Number(end.slice(0, 4)),
-    end,
-    revenue: revenue.get(end) ?? null,
-    netIncome: netIncome.get(end) ?? null
-  }));
+  const annual = ends.slice(-YEARS).map((end) => {
+    const capitalExpenditure = capex.has(end) ? Math.abs(capex.get(end)!) : null;
+    return {
+      year: Number(end.slice(0, 4)),
+      end,
+      revenue: revenue.get(end) ?? null,
+      netIncome: netIncome.get(end) ?? null,
+      operatingCashFlow: operating.get(end) ?? null,
+      capitalExpenditure,
+      freeCashFlow: freeCashFlow(operating.get(end) ?? null, capitalExpenditure)
+    };
+  });
 
   const lastEnd = ends.at(-1);
-  const cash = latestInstant(gaap, [
-    "CashAndCashEquivalentsAtCarryingValue",
-    "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
-  ]);
+  const last = annual.at(-1);
+  const cash = cashPosition(gaap);
   const owed = debt(gaap);
   const equity = latestInstant(gaap, [
     "StockholdersEquity",
@@ -304,6 +366,7 @@ export function summarize(cik: number, all: { dei?: Concepts; "us-gaap"?: Concep
   ]);
 
   return {
+    version: FIGURES_VERSION,
     cik,
     annual,
     latest: lastEnd
@@ -311,8 +374,9 @@ export function summarize(cik: number, all: { dei?: Concepts; "us-gaap"?: Concep
           end: lastEnd,
           revenue: revenue.get(lastEnd) ?? null,
           netIncome: netIncome.get(lastEnd) ?? null,
-          operatingCashFlow: operating.get(lastEnd) ?? null,
-          capitalExpenditure: capex.get(lastEnd) ?? null,
+          operatingCashFlow: last?.operatingCashFlow ?? null,
+          capitalExpenditure: last?.capitalExpenditure ?? null,
+          freeCashFlow: last?.freeCashFlow ?? null,
           // Absent du rapport = rien versé, pour une société qui publie
           // ses flux de trésorerie.
           dividendsPaid: dividends.get(lastEnd) ?? (operating.has(lastEnd) ? 0 : null)
@@ -320,7 +384,8 @@ export function summarize(cik: number, all: { dei?: Concepts; "us-gaap"?: Concep
       : null,
     balance: {
       end: [cash?.end, owed?.end, equity?.end].filter(Boolean).sort().at(-1) ?? null,
-      cash: cash?.val ?? null,
+      cash: cash?.cash ?? null,
+      shortTermInvestments: cash?.shortTermInvestments ?? null,
       debt: owed?.val ?? null,
       equity: equity?.val ?? null
     },
@@ -344,10 +409,9 @@ export class SecFundamentalsService {
   async figures(symbol: string): Promise<CompanyFigures | null> {
     const row = await this.prisma.companyFundamentals.findUnique({ where: { symbol } });
     const age = row ? Date.now() - row.fetchedAt.getTime() : Infinity;
-    // Une fiche enregistrée avant l'historique des dividendes n'a pas le
-    // champ : on la relit une fois, au lieu d'attendre 24 h.
-    const hasDividends = !!row?.data && "dividends" in (row.data as object);
-    if (row && age < (row.data ? FRESH_MS : MISSING_RETRY_MS) && (hasDividends || !row.data)) {
+    // Fiche d'un format antérieur : relue une fois, au lieu d'attendre 24 h.
+    const current = !row?.data || (row.data as { version?: number }).version === FIGURES_VERSION;
+    if (row && age < (row.data ? FRESH_MS : MISSING_RETRY_MS) && current) {
       return (row.data as unknown as CompanyFigures | null) ?? null;
     }
 

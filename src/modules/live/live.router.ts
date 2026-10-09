@@ -243,10 +243,13 @@ router.get(
     const marketCap = price && shares ? price * shares : null;
     const latest = figures?.latest ?? null;
     const netIncome = latest?.netIncome ?? null;
+    const fcf = latest?.freeCashFlow ?? null;
 
     const annual = figures?.annual ?? [];
     const withRevenue = annual.filter((a) => a.revenue != null);
     const withIncome = annual.filter((a) => a.netIncome != null);
+    // Fiche d'avant l'historique du FCF (cache SEC indisponible) : champ absent.
+    const withFcf = annual.filter((a) => a.freeCashFlow != null);
     const span = (rows: typeof annual) => (rows.length > 1 ? rows.at(-1)!.year - rows[0].year : 0);
 
     return {
@@ -258,6 +261,9 @@ router.get(
         // aucun sens. `isProfitable` le dit à l'écran.
         priceToEarnings: marketCap && netIncome && netIncome > 0 ? round(marketCap / netIncome, 1) : null,
         isProfitable: netIncome == null ? null : netIncome > 0,
+        // Même règle que le bénéfice : un argent dégagé nul ou négatif ne
+        // donne pas de ratio, plutôt qu'un chiffre trompeur.
+        priceToFreeCashFlow: marketCap && fcf && fcf > 0 ? round(marketCap / fcf, 1) : null,
         yearLow: closes.length ? Math.min(...closes) : null,
         yearHigh: closes.length ? Math.max(...closes) : null,
         dividends: figures?.dividends ?? null,
@@ -273,24 +279,35 @@ router.get(
             netIncome,
             netMargin:
               latest.revenue && netIncome != null ? round((netIncome / latest.revenue) * 100, 1) : null,
-            freeCashFlow:
-              latest.operatingCashFlow != null && latest.capitalExpenditure != null
-                ? latest.operatingCashFlow - latest.capitalExpenditure
-                : null,
+            operatingCashFlow: latest.operatingCashFlow,
+            capitalExpenditure: latest.capitalExpenditure,
+            freeCashFlow: fcf,
+            // Négative si l'entreprise consomme de l'argent : affichée telle quelle.
+            freeCashFlowMargin: latest.revenue && fcf != null ? round((fcf / latest.revenue) * 100, 1) : null,
             balanceDate: figures!.balance.end,
             cash: figures!.balance.cash,
+            shortTermInvestments: figures!.balance.shortTermInvestments ?? null,
             debt: figures!.balance.debt
           }
         : null,
       growth: annual.length
         ? {
-            years: annual.map((a) => ({ year: a.year, revenue: a.revenue, netIncome: a.netIncome })),
+            years: annual.map((a) => ({
+              year: a.year,
+              revenue: a.revenue,
+              netIncome: a.netIncome,
+              freeCashFlow: a.freeCashFlow ?? null
+            })),
             revenuePerYear: round(
               yearlyGrowth(withRevenue[0]?.revenue ?? null, withRevenue.at(-1)?.revenue ?? null, span(withRevenue)),
               1
             ),
             netIncomePerYear: round(
               yearlyGrowth(withIncome[0]?.netIncome ?? null, withIncome.at(-1)?.netIncome ?? null, span(withIncome)),
+              1
+            ),
+            freeCashFlowPerYear: round(
+              yearlyGrowth(withFcf[0]?.freeCashFlow ?? null, withFcf.at(-1)?.freeCashFlow ?? null, span(withFcf)),
               1
             ),
             spanYears: span(withRevenue.length ? withRevenue : withIncome)
