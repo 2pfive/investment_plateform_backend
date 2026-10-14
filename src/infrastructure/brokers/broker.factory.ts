@@ -11,7 +11,7 @@ import {
 
 /** Identifiant opaque du compte partagé, à placer dans `BrokerContext`. */
 export function sharedAccountCredential(
-  shared: NonNullable<BrokerConfig["sharedAccount"]>
+  shared: { keyId: string; secret: string }
 ): string {
   return apiKeyCredential(shared.keyId, shared.secret);
 }

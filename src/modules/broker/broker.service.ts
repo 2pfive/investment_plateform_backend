@@ -18,6 +18,8 @@ import {
   type BrokerAdapters
 } from "@/infrastructure/brokers/broker.factory.js";
 import type { BrokerContext } from "@/ports/broker.port.js";
+import { LedgerProvider } from "@/modules/ledger/ledger.provider.js";
+import { ensureSimulationFunding } from "@/modules/ledger/ledger.service.js";
 import { BrokerError } from "@/ports/broker.errors.js";
 
 /**
@@ -66,7 +68,17 @@ export interface BrokerConnectionDto {
   accountNumber: string | null;
   connectedAt: string | null;
   scopes: string[];
+  /**
+   * Mode pilote seulement. SIMULATION : solde virtuel tenu par AMARA ;
+   * PAPER_ACCOUNT : compte paper Alpaca (propriétaires) ; SHARED_LIVE :
+   * argent réel sur le compte partagé.
+   */
+  mode?: PilotRoute;
+  /** Le mode réel peut-il être choisi ? */
+  liveAvailable?: boolean;
 }
+
+type PilotRoute = "SIMULATION" | "PAPER_ACCOUNT" | "SHARED_LIVE";
 
 interface Dependencies {
   prisma?: typeof defaultPrisma;
@@ -176,13 +188,6 @@ export class BrokerConnectionService {
     config: BrokerConfig,
     requested?: string
   ): BrokerEnvironmentName {
-    /*
-     * Compte partagé : c'est le serveur qui choisit (ALPACA_TRADING_MODE).
-     * L'environnement demandé par l'application est ignoré, pour basculer
-     * paper ↔ live sans republier l'application.
-     */
-    if (config.sharedAccount) return config.sharedAccount.environment;
-
     const environment = (requested ?? config.defaultEnvironment).toUpperCase();
 
     if (environment !== "PAPER" && environment !== "LIVE") {
@@ -211,8 +216,80 @@ export class BrokerConnectionService {
    * serveur, après contrôle qu'il est ouvert. Public pour que les services
    * appelants (ordres) figent la même valeur que `withBroker` utilisera.
    */
-  environmentFor(requested?: string): BrokerEnvironmentName {
-    return this.resolveEnvironment(this.requireConfig(), requested);
+  async environmentFor(userId: string, requested?: string): Promise<BrokerEnvironmentName> {
+    const config = this.requireConfig();
+    return config.sharedAccount
+      ? (await this.pilotRoute(config, userId)).environment
+      : this.resolveEnvironment(config, requested);
+  }
+
+  /* ========================================================
+   * MODE PILOTE — un compte Alpaca partagé, un ledger par utilisateur
+   * ======================================================== */
+
+  /**
+   * L'argent réel n'est ouvert que sur décision explicite :
+   * `ALPACA_TRADING_MODE=LIVE`. Des clés LIVE présentes ne suffisent pas.
+   */
+  private liveAvailable(config: BrokerConfig): boolean {
+    return (
+      config.sharedAccount?.environment === "LIVE" &&
+      Boolean(config.accountKeys.LIVE) &&
+      config.allowedEnvironments.includes("LIVE")
+    );
+  }
+
+  /**
+   * Où passe un utilisateur. L'environnement demandé par l'application est
+   * ignoré : c'est le mode enregistré pour lui qui compte (`forced` : celui
+   * d'un ordre existant, qu'il ait changé de mode depuis ou non).
+   *
+   * Sans choix enregistré : les propriétaires du compte paper y restent ; les
+   * autres passent à l'argent réel dès que le serveur l'ouvre — c'est l'objet
+   * du pilote, la simulation n'en est que l'antichambre.
+   */
+  private async pilotRoute(
+    config: BrokerConfig,
+    userId: string,
+    forced?: BrokerEnvironmentName
+  ): Promise<{ environment: BrokerEnvironmentName; route: PilotRoute; keys: { keyId: string; secret: string } }> {
+    const user = await this.prisma.user.findUnique({
+      where: { user_id: userId },
+      select: { email: true, trading_mode: true }
+    });
+    const owner = Boolean(user && config.paperOwnerEmails.includes(user.email.toLowerCase()));
+    const environment =
+      forced ?? user?.trading_mode ?? (!owner && this.liveAvailable(config) ? "LIVE" : "PAPER");
+
+    if (environment === "LIVE") {
+      if (!this.liveAvailable(config)) {
+        throw new BrokerError("BROKER_ENVIRONMENT_NOT_ALLOWED", "Le trading réel n’est pas ouvert sur ce serveur.", 403);
+      }
+      return { environment, route: "SHARED_LIVE", keys: config.accountKeys.LIVE! };
+    }
+
+    if (owner && config.accountKeys.PAPER) {
+      return { environment, route: "PAPER_ACCOUNT", keys: config.accountKeys.PAPER };
+    }
+    // Simulation : les clés ne servent qu'à lire les cours, jamais à trader.
+    const keys = config.accountKeys.PAPER ?? config.accountKeys.LIVE;
+    if (!keys) {
+      throw new BrokerError("BROKER_NOT_CONFIGURED", "La simulation n’est pas disponible pour le moment.", 503);
+    }
+    return { environment, route: "SIMULATION", keys };
+  }
+
+  /** Choix du mode par l'utilisateur. */
+  async setMode(userId: string, mode: BrokerEnvironmentName): Promise<BrokerConnectionDto> {
+    const config = this.requireConfig();
+    if (!config.sharedAccount) {
+      throw new BrokerError("INVALID_REQUEST", "Le choix du mode n’existe qu’en mode pilote.", 400);
+    }
+    if (mode === "LIVE" && !this.liveAvailable(config)) {
+      throw new BrokerError("BROKER_ENVIRONMENT_NOT_ALLOWED", "Le trading réel n’est pas ouvert sur ce serveur.", 403);
+    }
+    await this.prisma.user.update({ where: { user_id: userId }, data: { trading_mode: mode } });
+    return this.getConnection(userId);
   }
 
   /* ========================================================
@@ -476,12 +553,12 @@ export class BrokerConnectionService {
     requestedEnvironment?: string
   ): Promise<BrokerConnectionDto> {
     const config = this.requireConfig();
-    const environment = this.resolveEnvironment(config, requestedEnvironment);
 
     if (config.sharedAccount) {
-      return this.sharedConnectionStatus(config, environment);
+      return this.sharedConnectionStatus(config, userId);
     }
 
+    const environment = this.resolveEnvironment(config, requestedEnvironment);
     const connection = await this.prisma.brokerConnection.findUnique({
       where: {
         userId_provider_environment: { userId, provider: PROVIDER, environment }
@@ -512,25 +589,28 @@ export class BrokerConnectionService {
   }
 
   /**
-   * État du compte partagé : relu chez Alpaca, ce qui vérifie les clés au
-   * passage. Le même pour tous les utilisateurs.
+   * État en mode pilote. Compte Alpaca (paper ou partagé réel) : relu chez
+   * Alpaca, ce qui vérifie les clés au passage. Simulation : rien à vérifier.
    */
-  private async sharedConnectionStatus(
-    config: BrokerConfig,
-    environment: BrokerEnvironmentName
-  ): Promise<BrokerConnectionDto> {
-    const shared = config.sharedAccount!;
+  private async sharedConnectionStatus(config: BrokerConfig, userId: string): Promise<BrokerConnectionDto> {
+    const { environment, route, keys } = await this.pilotRoute(config, userId);
     const base = {
       broker: "ALPACA" as const,
       environment,
       paper: environment === "PAPER",
-      scopes: ["trading"]
+      scopes: ["trading"],
+      mode: route,
+      liveAvailable: this.liveAvailable(config)
     };
+
+    if (route === "SIMULATION") {
+      return { ...base, status: "CONNECTED", accountNumber: maskAccountNumber(userId.slice(-4).toUpperCase()), connectedAt: null };
+    }
 
     try {
       const account = await this.adaptersFor(config).provider.getAccount({
         environment,
-        accessToken: sharedAccountCredential(shared)
+        accessToken: sharedAccountCredential(keys)
       });
       return {
         ...base,
@@ -555,6 +635,8 @@ export class BrokerConnectionService {
    */
   async disconnect(userId: string, requestedEnvironment?: string): Promise<void> {
     const config = this.requireConfig();
+    // Mode pilote : il n'y a pas de jeton à effacer.
+    if (config.sharedAccount) return;
     const environment = this.resolveEnvironment(config, requestedEnvironment);
 
     await this.prisma.brokerConnection.updateMany({
@@ -590,14 +672,20 @@ export class BrokerConnectionService {
     operation: (
       context: BrokerContext,
       adapters: BrokerAdapters,
-      connection: { id: string; environment: BrokerEnvironmentName }
-    ) => Promise<T>
+      connection: {
+        id: string;
+        environment: BrokerEnvironmentName;
+        /** Soldes et positions tenus par le ledger d'AMARA (mode pilote hors compte paper). */
+        ledger: boolean;
+      }
+    ) => Promise<T>,
+    /** Mode pilote : environnement imposé (celui d'un ordre existant). */
+    forced?: BrokerEnvironmentName
   ): Promise<T> {
     const config = this.requireConfig();
-    const environment = this.resolveEnvironment(config, requestedEnvironment);
 
     if (config.sharedAccount) {
-      const shared = config.sharedAccount;
+      const { environment, route, keys } = await this.pilotRoute(config, userId, forced);
 
       /*
        * Une ligne par utilisateur, sans jeton : les ordres s'y rattachent, et
@@ -619,12 +707,26 @@ export class BrokerConnectionService {
         select: { id: true }
       });
 
+      const adapters = this.adaptersFor(config);
+      const ledger = route !== "PAPER_ACCOUNT";
+      if (route === "SIMULATION") {
+        await ensureSimulationFunding(userId, config.simulationStartingCashUsd, this.prisma);
+      }
+
       return operation(
-        { environment, accessToken: sharedAccountCredential(shared) },
-        this.adaptersFor(config),
-        { id: row.id, environment }
+        // En simulation, le contexte ne sert qu'aux données : il suit les clés.
+        {
+          environment: route === "SIMULATION" && !config.accountKeys.PAPER ? "LIVE" : environment,
+          accessToken: sharedAccountCredential(keys)
+        },
+        ledger
+          ? { ...adapters, provider: new LedgerProvider(adapters.provider, userId, environment, route === "SIMULATION") }
+          : adapters,
+        { id: row.id, environment, ledger }
       );
     }
+
+    const environment = this.resolveEnvironment(config, requestedEnvironment);
 
     const connection = await this.prisma.brokerConnection.findUnique({
       where: {
@@ -683,7 +785,7 @@ export class BrokerConnectionService {
       const result = await operation(
         { environment, accessToken },
         this.adaptersFor(config),
-        { id: connection.id, environment }
+        { id: connection.id, environment, ledger: false }
       );
 
       await this.prisma.brokerConnection.update({

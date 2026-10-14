@@ -24,6 +24,9 @@ export type BrokerErrorCode =
   /** Le courtier a refusé l'ordre : fonds, position, actif. L'ordre est tracé. */
   | "ORDER_REJECTED"
   | "ORDER_NOT_FOUND"
+  /** Mode pilote : solde ou titres de l'utilisateur insuffisants (ledger). */
+  | "INSUFFICIENT_FUNDS"
+  | "INSUFFICIENT_POSITION"
   | "INVALID_AMOUNT"
   | "ASSET_NOT_FOUND"
   | "ASSET_NOT_TRADABLE"

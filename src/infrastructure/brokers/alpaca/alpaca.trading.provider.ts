@@ -95,7 +95,9 @@ const alpacaNews = z.object({
       source: z.string().default(""),
       url: z.string().nullable().optional(),
       created_at: z.string(),
-      symbols: z.array(z.string()).default([])
+      symbols: z.array(z.string()).default([]),
+      summary: z.string().nullable().optional(),
+      images: z.array(z.object({ size: z.string(), url: z.string() })).default([])
     })
   )
 });
@@ -388,7 +390,10 @@ export class AlpacaTradingProvider implements BrokerProvider {
       source: n.source,
       url: n.url ?? null,
       publishedAt: n.created_at,
-      symbols: n.symbols
+      symbols: n.symbols,
+      // Certains résumés arrivent avec des balises : on n'en garde que le texte.
+      summary: n.summary?.replace(/<[^>]*>/g, "").trim() || null,
+      imageUrl: (n.images.find((i) => i.size === "large") ?? n.images[0])?.url ?? null
     }));
   }
 
@@ -462,7 +467,7 @@ export class AlpacaTradingProvider implements BrokerProvider {
         this.url(context, "/v2/orders"),
         {
           symbol: request.symbol,
-          notional: request.notional,
+          ...(request.quantity ? { qty: request.quantity } : { notional: request.notional }),
           side: request.side === "BUY" ? "buy" : "sell",
           // Imposés par Alpaca pour un ordre en montant.
           type: "market",

@@ -40,6 +40,28 @@ export class BrokerController {
     this.callback = this.callback.bind(this);
     this.getConnection = this.getConnection.bind(this);
     this.disconnect = this.disconnect.bind(this);
+    this.setMode = this.setMode.bind(this);
+  }
+
+  /** Mode pilote : l'utilisateur choisit simulation (PAPER) ou argent réel (LIVE). */
+  async setMode(req: Request, res: Response) {
+    const userId = this.userId(req);
+    if (!userId) return this.unauthenticated(res);
+
+    const body = z.object({ mode: z.enum(["PAPER", "LIVE"]) }).safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID_REQUEST", message: "Mode invalide : attendu PAPER ou LIVE." }
+      });
+    }
+
+    try {
+      const data = await this.service.setMode(userId, body.data.mode);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      return this.fail(res, error, "changement de mode");
+    }
   }
 
   /** Réponse d'erreur au format commun de l'API. */

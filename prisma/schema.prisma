@@ -48,6 +48,10 @@ model user {
   updated_at DateTime? @updatedAt @db.Timestamptz(6)
   kyc_status KycStatus @default(NOT_STARTED)
   country    String?   @db.VarChar(2)
+  /// Mode pilote : LIVE = argent réel sur le compte partagé, PAPER =
+  /// simulation (virtuelle, ou compte paper Alpaca pour ses propriétaires).
+  /// `null` : jamais choisi, le serveur décide (réel dès qu'il est ouvert).
+  trading_mode BrokerEnvironment?
 
   accounts          accounts[]
   portofolios       portofolios[]
@@ -57,6 +61,7 @@ model user {
   idempotencyKeys   IdempotencyKey[]
   pushTokens        PushToken[]
   watchlist         WatchlistItem[]
+  cashMovements     CashMovement[]
 
   @@schema("auth")
 }
@@ -339,6 +344,34 @@ model Order {
   @@index([assetId], map: "idx_orders_asset")
   @@map("orders")
   @@schema("investing")
+}
+
+/// Ledger du compte partagé : espèces créditées ou débitées à un utilisateur
+/// par l'équipe (dépôt reçu hors application, retrait, correction). Append-only.
+/// Ses titres et le reste de ses espèces se déduisent de ses ordres exécutés.
+model CashMovement {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// PAPER = solde virtuel de simulation, LIVE = argent réel.
+  environment BrokerEnvironment
+  /// Signé : positif = crédit. En dollars, la devise du compte de courtage.
+  amountUsd Decimal  @map("amount_usd") @db.Decimal(24, 8)
+  /// Montant tel que saisi, et le taux appliqué, pour l'audit.
+  amount    Decimal  @db.Decimal(24, 8)
+  currency  Currency
+  fxRate    Decimal  @map("fx_rate") @db.Decimal(24, 12)
+  note      String
+  /// Qui a passé l'écriture.
+  createdBy String   @map("created_by") @db.VarChar(100)
+  /// Clé d'idempotence d'une écriture automatique (dotation de simulation).
+  reference String?  @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user user @relation(fields: [userId], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_cash_movements_user")
+
+  @@index([userId, environment], map: "idx_cash_movements_user_env")
+  @@map("cash_movements")
+  @@schema("billing")
 }
 
 /// Journal append-only des transitions de statut d'un ordre.
@@ -858,6 +891,22 @@ model CompanyFundamentals {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("company_fundamentals")
+  @@schema("market_data")
+}
+
+/// Titre d'actualité traduit en français par DeepL, gardé pour ne jamais le
+/// retraduire. `headline` est le titre anglais traduit : s'il change chez
+/// l'éditeur, la traduction est refaite.
+model NewsTranslation {
+  /// Identifiant de l'article chez Alpaca.
+  articleId  String   @id @map("article_id") @db.VarChar(32)
+  headline   String
+  headlineFr String   @map("headline_fr")
+  summary    String?
+  summaryFr  String?  @map("summary_fr")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("news_translations")
   @@schema("market_data")
 }
 

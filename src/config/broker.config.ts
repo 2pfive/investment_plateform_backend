@@ -155,6 +155,17 @@ const schema = z.object({
    */
   MOBILE_RETURN_URL_ALLOWLIST: csv.pipe(z.array(z.string()).min(1)),
 
+  /**
+   * Mode pilote (compte partagé) : comptes AMARA qui tradent DIRECTEMENT sur
+   * le compte paper Alpaca, séparés par des virgules. Tous les autres
+   * utilisateurs en mode simulation restent virtuels, sans appel à l'API de
+   * trading d'Alpaca.
+   */
+  PILOT_PAPER_OWNER_EMAILS: csv.default([]),
+
+  /** Solde virtuel de départ d'un utilisateur en simulation, en dollars. */
+  SIMULATION_STARTING_CASH_USD: z.string().regex(/^\d{1,9}(\.\d{1,2})?$/).default("10000"),
+
   /** Durée de validité d'un `state`, en secondes. */
   OAUTH_STATE_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600)
 });
@@ -185,6 +196,10 @@ export interface BrokerConfig {
   };
   returnUrlAllowlist: string[];
   stateTtlSeconds: number;
+  /** Clés par environnement en mode pilote : PAPER = propriétaires, LIVE = partagé réel. */
+  accountKeys: Record<BrokerEnvironmentName, { keyId: string; secret: string } | null>;
+  paperOwnerEmails: string[];
+  simulationStartingCashUsd: string;
 }
 
 export type BrokerConfigResult =
@@ -313,7 +328,10 @@ function load(): BrokerConfigResult {
       allowedEnvironments: env.BROKER_ALLOWED_ENVIRONMENTS,
       tokenKeys: { activeId: env.BROKER_TOKEN_KEY_ID, byId },
       returnUrlAllowlist: env.MOBILE_RETURN_URL_ALLOWLIST,
-      stateTtlSeconds: env.OAUTH_STATE_TTL_SECONDS
+      stateTtlSeconds: env.OAUTH_STATE_TTL_SECONDS,
+      accountKeys: keys,
+      paperOwnerEmails: env.PILOT_PAPER_OWNER_EMAILS.map((e) => e.trim().toLowerCase()),
+      simulationStartingCashUsd: env.SIMULATION_STARTING_CASH_USD
     }
   };
 }

@@ -8,6 +8,7 @@ import { FxRateService } from "@/modules/fx/fx.service.js";
 import { MarketCatalog, classify, search } from "./market.catalog.js";
 import { CompanyProfileService } from "./company.profile.js";
 import { SecFundamentalsService } from "./sec.fundamentals.js";
+import { NewsTranslator } from "./news.translator.js";
 
 /**
  * ============================================================
@@ -23,7 +24,7 @@ import { SecFundamentalsService } from "./sec.fundamentals.js";
  *   GET /live/history?range=1M
  *   GET /live/quotes?symbols=SPY,AAPL
  *   GET /live/bars/:symbol?range=1J
- *   GET /live/news?symbols=AAPL&limit=10
+ *   GET /live/news?symbols=AAPL&limit=10   (titres traduits, voir `news.translator.ts`)
  *   GET /live/market?type=ETF&q=gold&offset=0&limit=30
  *   GET /live/assets/:symbol
  *   GET /live/assets/:symbol/profile
@@ -59,6 +60,7 @@ const fx = new FxRateService();
 const market = new MarketCatalog();
 const profiles = new CompanyProfileService();
 const sec = new SecFundamentalsService();
+const translator = new NewsTranslator();
 
 /** Taux de croissance annuel moyen entre deux valeurs positives, en %. */
 function yearlyGrowth(first: number | null, last: number | null, years: number): number | null {
@@ -170,7 +172,7 @@ router.get(
 router.get(
   "/news",
   live(async ({ symbols, limit }, context, provider) => ({
-    news: await provider.getNews(context, symbols ?? [], limit)
+    news: await translator.translate(await provider.getNews(context, symbols ?? [], limit))
   }))
 );
 

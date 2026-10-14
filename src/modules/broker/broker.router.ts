@@ -18,5 +18,6 @@ router.post("/alpaca/authorize", requireAuth, tradingLimiter, controller.authori
 
 router.get("/connection", requireAuth, controller.getConnection);
 router.delete("/connection", requireAuth, controller.disconnect);
+router.put("/mode", requireAuth, controller.setMode);
 
 export default router;

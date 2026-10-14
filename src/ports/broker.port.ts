@@ -92,6 +92,9 @@ export interface NewsArticle {
   url: string | null;
   publishedAt: string;
   symbols: string[];
+  /** Chapeau de l'article, quand l'éditeur en fournit un. */
+  summary: string | null;
+  imageUrl: string | null;
 }
 
 /** Actif négociable chez le courtier. */
@@ -161,17 +164,20 @@ export interface BrokerOrder {
 }
 
 /**
- * Ordre au marché exprimé en MONTANT — la seule forme qu'AMARA émet.
+ * Ordre au marché exprimé en MONTANT, ou en quantité pour les ventes du
+ * compte partagé (on ne vend jamais plus que ce que l'utilisateur détient).
  *
- * Alpaca impose `market` et `day` pour un ordre `notional` : ils ne sont pas
+ * Alpaca impose `market` et `day` pour un ordre fractionné : ils ne sont pas
  * paramétrables ici, pour qu'aucun appelant ne puisse composer une
  * combinaison que le courtier refusera.
  */
 export interface NotionalOrderRequest {
   symbol: string;
   side: OrderSideName;
-  /** Dollars, deux décimales au plus. */
+  /** Dollars, deux décimales au plus. Ignoré si `quantity` est donnée. */
   notional: string;
+  /** Parts, neuf décimales au plus. */
+  quantity?: string;
   /** Clé d'idempotence côté courtier : 128 caractères au plus. */
   clientOrderId: string;
 }

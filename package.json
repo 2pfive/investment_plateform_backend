@@ -13,7 +13,8 @@
     "build": "prisma generate && cross-env NODE_ENV=production tsc && tsc-alias",
     "keys:rotate": "node scripts/rotate-jwt-keys.cjs .",
     "verify:broker": "tsx scripts/verify-broker-oauth.ts",
-    "verify:orders": "tsx scripts/verify-orders.ts"
+    "verify:orders": "tsx scripts/verify-orders.ts",
+    "ledger": "tsx scripts/ledger-credit.ts"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",

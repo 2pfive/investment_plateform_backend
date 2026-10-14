@@ -5,6 +5,7 @@ import { ordersConfig } from "@/config/orders.config.js";
 import { BrokerConnectionService } from "@/modules/broker/broker.service.js";
 import { FxRateService, type FundingCurrency } from "@/modules/fx/fx.service.js";
 import { PushService } from "@/modules/notifications/push.service.js";
+import { feeUsd, ledgerFor, lockUser } from "@/modules/ledger/ledger.service.js";
 import type {
   BrokerOrder,
   BrokerProvider,
@@ -250,7 +251,7 @@ export class OrderService {
    * ======================================================== */
 
   async estimate(userId: string, input: OrderInput): Promise<OrderEstimate> {
-    const environment = this.broker.environmentFor(input.environment);
+    const environment = await this.broker.environmentFor(userId, input.environment);
     const priced = await this.price(input);
 
     return this.broker.withBroker(userId, environment, async (context, { provider }) => {
@@ -277,7 +278,7 @@ export class OrderService {
    * ======================================================== */
 
   async placeOrder(userId: string, input: OrderInput, idempotencyKey: string): Promise<HttpOutcome> {
-    const environment = this.broker.environmentFor(input.environment);
+    const environment = await this.broker.environmentFor(userId, input.environment);
 
     const requestHash = sha256(
       JSON.stringify({
@@ -306,8 +307,50 @@ export class OrderService {
           const market = await this.clock(context, provider);
           const portfolioId = await this.portfolioFor(userId);
           const clientOrderId = `amara-${userId.slice(0, 8)}-${crypto.randomUUID()}`;
+          // Cours lu AVANT la transaction : un appel réseau n'y a pas sa place.
+          const price = connection.ledger && input.side === "SELL"
+            ? (await provider.getSnapshots(context, [asset.symbol]))[0]?.price ?? null
+            : null;
 
-          const order = await this.prisma.order.create({
+          /*
+           * Mode pilote : le compte Alpaca est commun, c'est le ledger qui dit
+           * ce que CET utilisateur peut dépenser ou vendre. Vérification et
+           * création de l'ordre sous verrou : l'ordre créé réserve aussitôt
+           * son montant, et le suivant le voit.
+           */
+          const order = await this.prisma.$transaction(async (tx) => {
+            let quantity: string | null = null;
+
+            if (connection.ledger) {
+              await lockUser(tx, userId);
+              const state = await ledgerFor(userId, environment, tx);
+
+              if (input.side === "BUY") {
+                const needed = new Decimal(priced.notionalUsd).plus(feeUsd({ fee: priced.fee, fxRate: priced.quote.perUsd }));
+                if (needed.gt(state.cashUsd.minus(state.reservedUsd))) {
+                  throw new BrokerError("INSUFFICIENT_FUNDS", "Solde insuffisant pour cet achat.", 422);
+                }
+              } else {
+                const holding = state.holdings.get(asset.symbol);
+                const available = (holding?.quantity ?? new Decimal(0)).minus(state.pendingSellQuantity.get(asset.symbol) ?? 0);
+                if (!available.gt(0)) {
+                  throw new BrokerError("INSUFFICIENT_POSITION", `Vous ne détenez pas de ${asset.symbol} à vendre.`, 422);
+                }
+                if (!price) {
+                  throw new BrokerError("BROKER_UNAVAILABLE", "Cours indisponible : réessayez dans un instant.", 503);
+                }
+                // Vente en QUANTITÉ, plafonnée à ce que l'utilisateur détient :
+                // en montant, une baisse du cours ferait vendre les titres d'un
+                // autre. À 2 % près du total, on vend tout, sans laisser de poussière.
+                const wanted = new Decimal(priced.notionalUsd).div(price).toDecimalPlaces(9, Decimal.ROUND_DOWN);
+                if (wanted.gt(available.times(1.02))) {
+                  throw new BrokerError("INSUFFICIENT_POSITION", `Montant supérieur à vos ${asset.symbol}.`, 422);
+                }
+                quantity = (wanted.gte(available.times(0.98)) ? available : wanted).toFixed();
+              }
+            }
+
+            return tx.order.create({
             data: {
               userId,
               portfolioId,
@@ -324,10 +367,12 @@ export class OrderService {
               fxRate: priced.quote.perUsd,
               fxRateId: priced.quote.fxRateId,
               fee: priced.fee,
+              quantity,
               clientOrderId,
               events: { create: { toStatus: "CREATED", source: "AMARA" } }
             },
-            select: { id: true }
+            select: { id: true, quantity: true }
+          });
           });
           orderId = order.id;
 
@@ -340,12 +385,14 @@ export class OrderService {
             symbol: asset.symbol,
             side: input.side,
             notional: priced.notionalUsd,
+            quantity: order.quantity?.toFixed() ?? undefined,
             clientOrderId
           }, market);
 
           await this.completeIdempotencyKey(keyId, outcome);
           return outcome;
-        }
+        },
+        environment
       );
     } catch (error) {
       if (orderId === null) {
@@ -368,7 +415,7 @@ export class OrderService {
     context: BrokerContext,
     provider: BrokerProvider,
     orderId: string,
-    request: { symbol: string; side: OrderSideName; notional: string; clientOrderId: string },
+    request: { symbol: string; side: OrderSideName; notional: string; quantity?: string; clientOrderId: string },
     market: MarketClock | null
   ): Promise<HttpOutcome> {
     try {
@@ -535,7 +582,7 @@ export class OrderService {
     userId: string,
     options: { environment?: string; limit: number; cursor?: string }
   ): Promise<{ orders: OrderDto[]; nextCursor: string | null }> {
-    const environment = options.environment ? this.broker.environmentFor(options.environment) : null;
+    const environment = options.environment ? await this.broker.environmentFor(userId, options.environment) : null;
 
     const rows = await this.prisma.order.findMany({
       where: {
@@ -629,7 +676,9 @@ export class OrderService {
           where: { id: order.id },
           data: { lastSyncedAt: this.now() }
         });
-      }
+      },
+      // Le mode de l'ordre, même si l'utilisateur en a changé depuis.
+      order.brokerConnection.environment
     );
   }
 
