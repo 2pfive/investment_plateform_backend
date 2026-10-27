@@ -17,5 +17,6 @@ router.post('/login', authLimiter, controller.loginController)
 router.post('/register', registerLimiter, user_controller.createUser)
 
 router.get('/me', requireAuth, controller.verifyCurrentUser)
+router.post('/logout', requireAuth, controller.logoutController)
 
 export default router

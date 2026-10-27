@@ -9,6 +9,7 @@ import OrderRouter from "../modules/orders/order.router.js"
 import LiveRouter from "../modules/live/live.router.js"
 import NotificationRouter from "../modules/notifications/notification.router.js"
 import WatchlistRouter from "../modules/watchlist/watchlist.router.js"
+import AdminRouter from "../modules/admin/admin.router.js"
 
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma.js";
@@ -28,6 +29,8 @@ router.use('/orders',requireAuth,OrderRouter)
 router.use('/live',requireAuth,LiveRouter)
 router.use('/notifications',requireAuth,NotificationRouter)
 router.use('/watchlist',requireAuth,WatchlistRouter)
+// Back-office : authentification admin propre (voir admin.rbac.ts).
+router.use('/admin',AdminRouter)
 
 
 router.get('/etf', async (req: Request, res: Response) => {

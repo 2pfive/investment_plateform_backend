@@ -14,10 +14,8 @@
  * Argent réel (LIVE) par défaut ; `--paper` pour le solde virtuel de simulation.
  */
 import os from "node:os";
-import Decimal from "decimal.js";
 import { prisma } from "../src/lib/prisma.js";
-import { FxRateService, type FundingCurrency } from "../src/modules/fx/fx.service.js";
-import { ledgerFor, lockUser } from "../src/modules/ledger/ledger.service.js";
+import { ledgerFor, postCashMovement } from "../src/modules/ledger/ledger.service.js";
 
 const args = process.argv.slice(2).filter((a) => a !== "--paper");
 const environment = process.argv.includes("--paper") ? "PAPER" : "LIVE";
@@ -36,41 +34,16 @@ async function main() {
   const userId = user.user_id;
 
   if (rawAmount !== undefined) {
-    const currency = (rawCurrency ?? "").toUpperCase() as FundingCurrency;
-    if (!["XAF", "USD", "EUR"].includes(currency)) fail("Devise attendue : XAF, USD ou EUR.");
-    if (!note?.trim()) fail("Une note est obligatoire (référence du paiement, motif).");
-    let amount: Decimal;
-    try {
-      amount = new Decimal(rawAmount);
-    } catch {
-      fail("Montant invalide.");
-    }
-    if (amount.isZero() || !amount.isFinite()) fail("Montant invalide.");
-
-    const quote = await new FxRateService().quote(currency);
-    const amountUsd = amount.div(quote.perUsd).toDecimalPlaces(2, Decimal.ROUND_DOWN);
-
-    await prisma.$transaction(async (tx) => {
-      await lockUser(tx, userId);
-      if (amountUsd.isNegative()) {
-        const state = await ledgerFor(userId, environment, tx);
-        const available = state.cashUsd.minus(state.reservedUsd);
-        if (amountUsd.abs().gt(available)) fail(`Débit refusé : ${available.toFixed(2)} $ disponibles seulement.`);
-      }
-      await tx.cashMovement.create({
-        data: {
-          userId,
-          environment,
-          amountUsd: amountUsd.toFixed(2),
-          amount: amount.toFixed(),
-          currency,
-          fxRate: quote.perUsd,
-          note: note!.trim(),
-          createdBy: os.userInfo().username
-        }
-      });
-    });
-    console.log(`Écriture passée : ${amount.toFixed()} ${currency} = ${amountUsd.toFixed(2)} $ (${environment}).`);
+    const currency = (rawCurrency ?? "").toUpperCase() as "XAF" | "USD" | "EUR";
+    const m = await postCashMovement({
+      userId,
+      environment,
+      amount: rawAmount,
+      currency,
+      note: note ?? "",
+      createdBy: os.userInfo().username
+    }).catch((e: Error) => fail(e.message));
+    console.log(`Écriture passée : ${m.amount.toFixed()} ${currency} = ${m.amountUsd.toFixed(2)} $ (${environment}).`);
   }
 
   const state = await ledgerFor(userId, environment);

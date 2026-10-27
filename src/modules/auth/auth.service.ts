@@ -30,6 +30,8 @@ export class AuthService {
 
         const same_pswd = await comparePasswords(user.password, password)
         if (!same_pswd) throw new AppError("Email ou mot de passe incorrect", 400)
+        // Compte désactivé depuis le back-office.
+        if (user.is_active === false) throw new AppError("Ce compte est désactivé. Contactez le support.", 403)
 
         // Données de sessions
         if (!user.user_id) throw new AppError("Error on undefined user_id", 400)

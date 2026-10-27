@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
 import { prisma as defaultPrisma } from "@/lib/prisma.js";
+import { AppError } from "@/utils/errorHandler.js";
 import { TERMINAL_STATUSES } from "@/modules/orders/order.dto.js";
 import type { BrokerEnvironment, OrderSideName, OrderStatusName } from "@/ports/broker.port.js";
 
@@ -194,5 +195,56 @@ export async function ensureSimulationFunding(userId: string, amountUsd: string,
       }
     ],
     skipDuplicates: true
+  });
+}
+
+/**
+ * Crédit (montant positif) ou débit (négatif) manuel d'un utilisateur, converti
+ * en dollars au taux du jour. Un débit ne peut dépasser le disponible.
+ * Utilisé par le back-office et par `scripts/ledger-credit.ts`.
+ */
+export async function postCashMovement(input: {
+  userId: string;
+  environment: BrokerEnvironment;
+  amount: string;
+  currency: "XAF" | "USD" | "EUR";
+  note: string;
+  createdBy: string;
+}) {
+  let amount: Dec;
+  try {
+    amount = new Decimal(input.amount);
+  } catch {
+    throw new AppError("Montant invalide.", 400);
+  }
+  if (amount.isZero() || !amount.isFinite()) throw new AppError("Montant invalide.", 400);
+  if (!["XAF", "USD", "EUR"].includes(input.currency)) throw new AppError("Devise attendue : XAF, USD ou EUR.", 400);
+  const note = input.note?.trim();
+  if (!note) throw new AppError("Une note est obligatoire (référence du paiement, motif).", 400);
+
+  // Import tardif : le service FX tire la config réseau, inutile aux tests purs.
+  const { FxRateService } = await import("@/modules/fx/fx.service.js");
+  const quote = await new FxRateService().quote(input.currency);
+  const amountUsd = amount.div(quote.perUsd).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+
+  return defaultPrisma.$transaction(async (tx) => {
+    await lockUser(tx, input.userId);
+    if (amountUsd.isNegative()) {
+      const state = await ledgerFor(input.userId, input.environment, tx);
+      const available = state.cashUsd.minus(state.reservedUsd);
+      if (amountUsd.abs().gt(available)) throw new AppError(`Débit refusé : ${available.toFixed(2)} $ disponibles seulement.`, 400);
+    }
+    return tx.cashMovement.create({
+      data: {
+        userId: input.userId,
+        environment: input.environment,
+        amountUsd: amountUsd.toFixed(2),
+        amount: amount.toFixed(),
+        currency: input.currency,
+        fxRate: quote.perUsd,
+        note,
+        createdBy: input.createdBy
+      }
+    });
   });
 }

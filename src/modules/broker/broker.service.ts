@@ -279,6 +279,21 @@ export class BrokerConnectionService {
     return { environment, route: "SIMULATION", keys };
   }
 
+  /**
+   * Derniers cours, hors de tout utilisateur (back-office). Mêmes clés que la
+   * simulation : lecture seule, aucun effet de bord.
+   */
+  async quotes(symbols: string[]) {
+    if (!symbols.length) return [];
+    const config = this.requireConfig();
+    const keys = config.accountKeys.PAPER ?? config.accountKeys.LIVE;
+    if (!keys) throw new BrokerError("BROKER_NOT_CONFIGURED", "Cours indisponibles.", 503);
+    return this.adaptersFor(config).provider.getSnapshots(
+      { environment: config.accountKeys.PAPER ? "PAPER" : "LIVE", accessToken: sharedAccountCredential(keys) },
+      symbols
+    );
+  }
+
   /** Choix du mode par l'utilisateur. */
   async setMode(userId: string, mode: BrokerEnvironmentName): Promise<BrokerConnectionDto> {
     const config = this.requireConfig();

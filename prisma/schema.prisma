@@ -45,9 +45,9 @@ model user {
   last_name    String?   @db.VarChar(100)
 
   // --- AJOUTS Phase 2 (tous nullables ou avec défaut) ---
-  updated_at DateTime? @updatedAt @db.Timestamptz(6)
-  kyc_status KycStatus @default(NOT_STARTED)
-  country    String?   @db.VarChar(2)
+  updated_at   DateTime?          @updatedAt @db.Timestamptz(6)
+  kyc_status   KycStatus          @default(NOT_STARTED)
+  country      String?            @db.VarChar(2)
   /// Mode pilote : LIVE = argent réel sur le compte partagé, PAPER =
   /// simulation (virtuelle, ou compte paper Alpaca pour ses propriétaires).
   /// `null` : jamais choisi, le serveur décide (réel dès qu'il est ouvert).
@@ -350,22 +350,22 @@ model Order {
 /// par l'équipe (dépôt reçu hors application, retrait, correction). Append-only.
 /// Ses titres et le reste de ses espèces se déduisent de ses ordres exécutés.
 model CashMovement {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
+  id          String            @id @default(uuid()) @db.Uuid
+  userId      String            @map("user_id") @db.Uuid
   /// PAPER = solde virtuel de simulation, LIVE = argent réel.
   environment BrokerEnvironment
   /// Signé : positif = crédit. En dollars, la devise du compte de courtage.
-  amountUsd Decimal  @map("amount_usd") @db.Decimal(24, 8)
+  amountUsd   Decimal           @map("amount_usd") @db.Decimal(24, 8)
   /// Montant tel que saisi, et le taux appliqué, pour l'audit.
-  amount    Decimal  @db.Decimal(24, 8)
-  currency  Currency
-  fxRate    Decimal  @map("fx_rate") @db.Decimal(24, 12)
-  note      String
+  amount      Decimal           @db.Decimal(24, 8)
+  currency    Currency
+  fxRate      Decimal           @map("fx_rate") @db.Decimal(24, 12)
+  note        String
   /// Qui a passé l'écriture.
-  createdBy String   @map("created_by") @db.VarChar(100)
+  createdBy   String            @map("created_by") @db.VarChar(100)
   /// Clé d'idempotence d'une écriture automatique (dotation de simulation).
-  reference String?  @unique @db.VarChar(100)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  reference   String?           @unique @db.VarChar(100)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user user @relation(fields: [userId], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_cash_movements_user")
 
@@ -851,20 +851,20 @@ model CompanyProfile {
   symbol String @id @db.VarChar(32)
 
   /// `null` : cherché sur Wikidata, introuvable. On réessaie plus tard.
-  wikidataId   String?  @map("wikidata_id") @db.VarChar(32)
-  name         String?
-  logoUrl      String?  @map("logo_url")
-  industry     String?
-  employees    Int?
-  headquarters String?
+  wikidataId    String? @map("wikidata_id") @db.VarChar(32)
+  name          String?
+  logoUrl       String? @map("logo_url")
+  industry      String?
+  employees     Int?
+  headquarters  String?
   /// « 1980-12-12 », « 1980-12 » ou « 1980 », selon la précision connue.
-  ipoDate      String?  @map("ipo_date") @db.VarChar(10)
-  website      String?
+  ipoDate       String? @map("ipo_date") @db.VarChar(10)
+  website       String?
   /// Titre de l'article, pour le lien « Source : Wikipédia ».
-  wikiTitleFr  String?  @map("wiki_title_fr")
+  wikiTitleFr   String? @map("wiki_title_fr")
   /// Introductions des articles Wikipédia (CC BY-SA : citer la source).
-  summaryFr    String?  @map("summary_fr")
-  summaryEn    String?  @map("summary_en")
+  summaryFr     String? @map("summary_fr")
+  summaryEn     String? @map("summary_en")
   /// Description rédigée ou traduite par l'équipe. Prioritaire à l'affichage.
   descriptionFr String? @map("description_fr")
 
@@ -960,4 +960,59 @@ enum PriceInterval {
   DAY_1
 
   @@schema("market_data")
+}
+
+// =============================================================================
+// ADMIN — back-office (comptes équipe, distincts des clients)
+// =============================================================================
+
+/// Rôles du back-office. Les permissions de chaque rôle vivent dans
+/// `src/modules/admin/admin.rbac.ts`.
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  FINANCE
+  SUPPORT
+
+  @@schema("auth")
+}
+
+model AdminUser {
+  id          String    @id @default(uuid()) @db.Uuid
+  email       String    @unique @db.VarChar(255)
+  name        String    @db.VarChar(100)
+  password    String
+  role        AdminRole @default(SUPPORT)
+  isActive    Boolean   @default(true) @map("is_active")
+  lastLoginAt DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  auditLogs AdminAuditLog[]
+
+  @@map("admin_users")
+  @@schema("auth")
+}
+
+/// Journal append-only des actions du back-office.
+model AdminAuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// Admin auteur ; absent pour une connexion client ou une tentative échouée.
+  adminId   String?  @map("admin_id") @db.Uuid
+  /// Email de l'acteur (admin ou client), tel que saisi pour un échec.
+  actorEmail String? @map("actor_email") @db.VarChar(255)
+  action    String   @db.VarChar(64)
+  /// Client ou admin visé.
+  targetId  String?  @map("target_id") @db.VarChar(64)
+  details   Json?
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(512)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  admin AdminUser? @relation(fields: [adminId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_admin_audit_admin")
+
+  @@index([createdAt], map: "idx_admin_audit_created")
+  @@index([action], map: "idx_admin_audit_action")
+  @@map("admin_audit_logs")
+  @@schema("auth")
 }

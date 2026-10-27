@@ -14,7 +14,8 @@
     "keys:rotate": "node scripts/rotate-jwt-keys.cjs .",
     "verify:broker": "tsx scripts/verify-broker-oauth.ts",
     "verify:orders": "tsx scripts/verify-orders.ts",
-    "ledger": "tsx scripts/ledger-credit.ts"
+    "ledger": "tsx scripts/ledger-credit.ts",
+    "admin:create": "tsx scripts/create-admin.ts"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
